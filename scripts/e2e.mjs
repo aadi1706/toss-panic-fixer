@@ -34,16 +34,19 @@ async function scenario(browser, label, { width, height, phone }) {
   const count = (sel) => p.locator(sel).filter({ visible: true }).count();
   const overflow = () => p.evaluate(() => document.documentElement.scrollWidth - innerWidth);
   const toss = async () => { await press('[data-act=toss]:visible'); await p.waitForSelector('#coin', { state: 'detached', timeout: 6000 }); };
-  const fresh = async () => { await p.goto(url); await p.waitForSelector('.team.pre'); };
-  const broken = phone ? '.mrows .trow.broken' : '.dcards .team.broken';
-  const fine = phone ? '.mrows .trow.fine' : '.dcards .team.fine';
-  const fixed = phone ? '.mrows .trow.fixed' : '.dcards .team.fixed';
-  const t1 = async () => { if (phone) { await press('.mrows .trow:has-text("Powerplay Pandits") .open'); await p.waitForSelector('.sheet'); } };
+  const fresh = async () => { await p.goto(url); await p.waitForSelector('.trow.pre'); };
+  const broken = '.trow.broken', fine = '.trow.fine', fixed = '.trow.fixed';
+  // Open a team: a bottom sheet on phones, the workspace on desktop.
+  const openTeam = async (name) => { await press(`.trow:has-text("${name}") .open`); if (phone) await p.waitForSelector('.sheet'); };
+  const t1 = () => openTeam('Powerplay Pandits');
   const closeSheet = async () => { if (phone && (await p.locator('.sheet').count())) { await p.keyboard.press('Escape'); await p.waitForSelector('.sheet', { state: 'detached' }); } };
 
   // pre-toss
   await fresh();
-  ok((await count('.team.pre')) === 8, 'pre-toss shows all 8 fantasy teams');
+  ok((await count('.trow.pre')) === 8, 'pre-toss shows all 8 fantasy teams');
+  await press('.trow.pre .open >> nth=0'); if (phone) await p.waitForSelector('.sheet');
+  ok(!/\bBats \d|Not in XI/.test(await p.locator(phone ? '.sheet' : '.workspace').innerText()), 'pre-toss player rows do not reveal the playing XI (no batting slots, no "Not in XI")');
+  await closeSheet();
   ok(await p.locator('.sample:visible').first().isVisible(), 'SAMPLE (simulated) label visible');
   ok((await p.textContent('.top')).includes('SAMPLE (simulated)'), 'label text is exactly "SAMPLE (simulated)"');
   ok((await count('.tabs')) === (0), 'no tabs before the toss');
@@ -51,11 +54,12 @@ async function scenario(browser, label, { width, height, phone }) {
 
   // toss
   await toss();
+  await p.waitForTimeout(900); // the impact numbers count up for 0.7s after the toss
   const impact = await p.locator('.impact').first().innerText();
   ok(/7\s*\/8/.test(impact) && /7\s*players out/i.test(impact) && /3\s*captains out/i.test(impact) && /3\s*VCs out/i.test(impact) && /1 team is fine/.test(impact), 'impact summary: 7/8 teams, 7 players, 3 captains, 3 VCs, 1 fine');
   ok((await p.locator('.impact').first().boundingBox()).y + 120 < height, 'impact summary visible without scrolling');
   ok((await count(broken)) === 7 && (await count(fine)) === 1, '7 broken and 1 fine team shown');
-  ok((await count(phone ? '.tabs' : '.xi')) > 0, phone ? 'tabs visible on phone' : 'playing XIs visible on desktop');
+  ok((await count(phone ? '.tabs' : '.news')) > 0, phone ? 'tabs visible on phone' : 'playing XIs and toss report visible on desktop');
   ok((await overflow()) === 0, 'no horizontal overflow (post-toss)');
 
   // interactions
@@ -72,15 +76,21 @@ async function scenario(browser, label, { width, height, phone }) {
     await p.waitForSelector('.sheet', { state: 'detached' });
     ok(/Powerplay Pandits fixed/.test(await p.textContent('#toast')), 'apply from sheet closes it and shows a toast');
   } else {
-    await p.click('[data-opt="t1:1"]');
-    ok((await p.getAttribute('[data-opt="t1:1"]', 'aria-pressed')) === 'true', 'option 2 selectable');
-    await p.click('[data-opt="t1:0"]');
-    await p.click('.dcards [data-apply="t1"]');
+    ok((await p.locator('.workspace h2').innerText()) === 'Powerplay Pandits', 'workspace starts on the first broken team');
+    await p.click('.workspace [data-opt="t1:1"]');
+    ok((await p.getAttribute('.workspace [data-opt="t1:1"]', 'aria-pressed')) === 'true', 'option 2 selectable');
+    await p.click('.workspace [data-opt="t1:0"]');
+    await openTeam('Super Over Squad');
+    ok((await p.locator('.workspace h2').innerText()) === 'Super Over Squad', 'selecting a team in the ledger switches the workspace');
+    await openTeam('Powerplay Pandits');
+    await p.click('.workspace [data-apply="t1"]');
+    ok((await p.locator('.workspace h2').innerText()) === 'Super Over Squad', 'after applying, the workspace advances to the next unfixed team');
   }
   ok((await count(fixed)) === 1, 'applying one fix marks exactly that team as fixed');
   ok(/Fix all \(6\)/.test(await p.textContent('[data-act=fixall]:visible')), 'Fix all counter drops to 6');
-  if (phone) { await press('.mrows .trow.fixed .open'); await p.waitForSelector('.sheet'); await press('.sheet [data-undo="t1"]'); await closeSheet(); }
-  else await p.click('[data-undo="t1"]');
+  await t1();
+  await press((phone ? '.sheet' : '.workspace') + ' [data-undo="t1"]');
+  await closeSheet();
   ok((await count(fixed)) === 0 && /Fix all \(7\)/.test(await p.textContent('[data-act=fixall]:visible')), 'undo restores the team and the counter');
   await press('[data-lang=hinglish]:visible');
   await t1();
@@ -90,7 +100,7 @@ async function scenario(browser, label, { width, height, phone }) {
   // no-valid-fix path through the real render code
   await p.evaluate(() => { const f = window.__tpf.state.fixes.get('t3'); window.__tpf.state.fixes.set('t3', { ...f, options: [], impossible: true }); });
   await press('[data-lang=hinglish]:visible'); await press('[data-lang=en]:visible');
-  if (phone) { await press('.mrows .trow:has-text("Yorker Yodhas") .open'); await p.waitForSelector('.sheet'); }
+  await openTeam('Yorker Yodhas');
   ok((await count('.nofix')) === 1, 'no-valid-fix team shows the "No valid fix" explanation');
   await closeSheet();
 
@@ -101,24 +111,26 @@ async function scenario(browser, label, { width, height, phone }) {
   ok(await p.locator('[data-act=fixall]:visible').isDisabled(), 'Fix all disabled when nothing is left');
   await press('[data-act=play]:visible');
   await p.waitForSelector('.fulltime');
-  const ft = await p.locator('.fulltime').innerText();
+  const ft = (await p.locator('.board').innerText()) + (await p.locator('.fulltime').innerText());
   ok(ft.includes(`${expectFixAll.recovered}%`), `recovered ${expectFixAll.recovered}% matches the engine-computed value`);
   ok([expectFixAll.totals.none, expectFixAll.totals.mine, expectFixAll.totals.hind].every((v) => ft.includes(fmt(v))), `totals ${fmt(expectFixAll.totals.none)} / ${fmt(expectFixAll.totals.mine)} / ${fmt(expectFixAll.totals.hind)} shown`);
   ok(ft.includes('SAMPLE (simulated)') && /not a real-world accuracy figure/.test(ft), 'result is labelled SAMPLE (simulated) with the honesty note');
-  ok((await count(phone ? '.mrows .trow.result' : '.dcards .team')) === 8, 'result lists all 8 teams');
-  ok(/no change/.test(await p.locator(phone ? '.mrows' : '.dcards').first().innerText()) || !phone, 'control team shows no change');
+  ok((await count('.trow.result')) === 8, 'result lists all 8 teams');
+  ok(/no change/.test(await p.locator('.rows').innerText()), 'control team shows no change');
   ok((await overflow()) === 0, 'no horizontal overflow (result)');
-  if (phone) { await press('.mrows .trow.result .open >> nth=0'); await p.waitForSelector('.sheet'); ok(/Without fixing/.test(await p.locator('.sheet .score').innerText()), 'result sheet shows the three-way scorecard'); await closeSheet(); }
+  await press('.trow.result .open >> nth=0'); if (phone) await p.waitForSelector('.sheet');
+  ok(/Without fixing/.test(await p.locator((phone ? '.sheet' : '.workspace') + ' .score').innerText()), 'team detail shows the three-way scorecard');
+  await closeSheet();
 
   // start over
   await press('[data-act=reset]:visible');
-  await p.waitForSelector('.team.pre');
+  await p.waitForSelector('.trow.pre');
   const st = await p.evaluate(() => ({ applied: window.__tpf.state.applied.size, phase: window.__tpf.state.phase, result: window.__tpf.state.result }));
   ok(st.phase === 'pre' && st.applied === 0 && st.result === null, 'Start over resets all state');
 
   // flow C: play without fixing
   await toss(); await press('[data-act=play]:visible'); await p.waitForSelector('.fulltime');
-  const ft0 = await p.locator('.fulltime').innerText();
+  const ft0 = (await p.locator('.board').innerText()) + (await p.locator('.fulltime').innerText());
   ok(ft0.includes('0%') && ft0.includes(fmt(expectNone.totals.none)), `playing without fixing: 0% recovered, total ${fmt(expectNone.totals.none)}`);
 
   // AI
@@ -133,8 +145,8 @@ async function scenario(browser, label, { width, height, phone }) {
     await closeSheet();
     if (phone) await press('[data-tab=ask]');
     await press('[data-chip="Which of my teams has no valid fix?"]:visible');
-    await press('.ask .apply:visible');
-    await p.waitForFunction(() => !/Checking/.test(document.querySelector('.ask .apply').textContent), null, { timeout: 60000 });
+    await press('.ask form .btn:visible');
+    await p.waitForFunction(() => !/Checking/.test(document.querySelector('.ask form .btn').textContent), null, { timeout: 60000 });
     if (withAI) ok((await p.locator('.answer').count()) === 1 && /overview_all_teams|get_team|simulate_swap/.test(await p.locator('.answer').innerText()), 'Ask the Fixer: answer shown with the engine tools it used');
     else ok((await count('.ask .aierr')) === 1 && (await p.locator('.answer').count()) === 0, 'AI down: Ask shows an error, app keeps working');
   }

@@ -23,7 +23,7 @@ for (const [name, width, height, phone] of [['desktop', 1280, 900, false], ['pho
   console.log(`\n--- ${name} ---`);
   const p = await browser.newPage({ viewport: { width, height }, hasTouch: phone, isMobile: phone });
   const press = (s) => (phone ? p.tap(s) : p.click(s));
-  await p.goto(url); await p.waitForSelector('.team.pre');
+  await p.goto(url); await p.waitForSelector('.trow.pre');
   await axe(p, 'pre-toss');
   await press('[data-act=toss]:visible');
   // toss dialog: focus lands in it, page behind is inert, Escape closes it and returns focus to the content
@@ -41,7 +41,7 @@ for (const [name, width, height, phone] of [['desktop', 1280, 900, false], ['pho
   await p.keyboard.press('Enter');
   if (phone) {
     // sheet: opens with focus inside, traps Tab, Escape closes and returns focus to the row
-    await p.focus('.mrows .trow.broken .open >> nth=0'); await p.keyboard.press('Enter');
+    await p.focus('.trow.broken .open >> nth=0'); await p.keyboard.press('Enter');
     await p.waitForSelector('.sheet');
     ok(await p.evaluate(() => document.activeElement?.classList.contains('sheet')), 'sheet receives focus when opened');
     ok(await p.evaluate(() => document.querySelector('.page').hasAttribute('inert')), 'page behind the sheet is inert');
@@ -50,16 +50,16 @@ for (const [name, width, height, phone] of [['desktop', 1280, 900, false], ['pho
     await axe(p, 'repair sheet');
     await p.keyboard.press('Escape'); await p.waitForSelector('.sheet', { state: 'detached' });
     ok(await p.evaluate(() => document.activeElement?.dataset?.open === 't1'), 'focus returns to the row that opened the sheet');
-    await p.focus('.mrows .trow.broken .qa >> nth=0'); await p.keyboard.press('Enter');
+    await p.focus('.trow.broken .qa >> nth=0'); await p.keyboard.press('Enter');
     ok(await p.evaluate(() => !!document.activeElement && document.activeElement !== document.body), 'focus is not dropped after a one-tap fix');
   } else {
-    await p.focus('.dcards [data-apply="t1"]'); await p.keyboard.press('Enter');
-    ok(await p.evaluate(() => document.activeElement?.dataset?.undo === 't1'), 'focus moves from Apply fix to Undo on the same team');
-    await p.keyboard.press('Enter');
+    await p.focus('.workspace [data-apply="t1"]'); await p.keyboard.press('Enter');
+    ok(await p.evaluate(() => document.activeElement?.dataset?.open === 't1'), 'focus lands on the fixed team\'s row after Apply fix');
+    await p.keyboard.press('Enter'); await p.click('.workspace [data-undo="t1"]');
   }
   await press('[data-act=fixall]:visible'); await axe(p, 'after Fix all');
   await press('[data-act=play]:visible'); await p.waitForSelector('.fulltime'); await axe(p, 'full time result');
-  if (phone) { await press('.mrows .trow.result .open >> nth=0'); await p.waitForSelector('.sheet'); await axe(p, 'result sheet'); }
+  if (phone) { await press('.trow.result .open >> nth=0'); await p.waitForSelector('.sheet'); await axe(p, 'result sheet'); }
   await p.close();
 }
 await browser.close();

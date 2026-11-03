@@ -1,6 +1,8 @@
 // Browser UI. Pure engine code does the work; this file only renders and wires events.
-import { ctx, teams, meta, match, sides, actualPoints } from './data.js';
-import { fixTeam, findBroken, teamStats } from './engine.js';
+// Layout model: a team ledger (all 8 teams, scannable) + a repair workspace for the selected team
+// + a context rail (toss report, playing XIs, Ask). On phones the workspace is a bottom sheet.
+import { ctx, teams, meta, match, sides, players, actualPoints } from './data.js';
+import { fixTeam, teamStats, LIMITS } from './engine.js';
 import { explainTemplate, noFixText } from './explain.js';
 import { evaluate } from './evaluate.js';
 import { explainAll, askFixer } from './ai.js';
@@ -17,10 +19,13 @@ const state = {
   ask: { q: '', loading: false, answer: '', tools: [], error: '' },
   coin: false, // toss reveal overlay is showing
   fresh: false, // XIs are animating in
-  xiOpen: true,
   askOpen: true,
   tab: 'teams', // phone only: teams | xi | ask
   sheet: null, // phone only: team id shown in the bottom sheet
+  sel: null, // desktop only: team id shown in the workspace
+  xiSide: 'BAY', // which playing XI the rail shows
+  flash: new Set(), // team ids that were just fixed (row highlight)
+  animateSel: false,
   toast: '',
 };
 
@@ -29,68 +34,66 @@ const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&
 const fmt = (n) => (Math.round(n * 10) / 10).toLocaleString('en-IN', { minimumFractionDigits: 1, maximumFractionDigits: 1 });
 const P = (id) => ctx.pool.get(id);
 const reduceMotion = () => window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+const isDesktop = () => window.matchMedia('(min-width: 900px)').matches;
 const ROLES = ['WK', 'BAT', 'AR', 'BOWL'];
+const ROLE_NAME = { WK: 'Wicketkeepers', BAT: 'Batters', AR: 'All-rounders', BOWL: 'Bowlers' };
+const RANK = { WK: 0, BAT: 1, AR: 2, BOWL: 3 };
+
+// How many of the fan's teams each player appears in (derived from the real teams; used for exposure).
+const exposure = new Map();
+for (const t of teams) for (const id of t.players) exposure.set(id, (exposure.get(id) || 0) + 1);
+
+const ordered = () => (state.phase === 'toss'
+  ? [...teams].sort((a, b) => Number(state.fixes.get(b.id).broken) - Number(state.fixes.get(a.id).broken))
+  : teams);
 
 /* ---------- players ---------- */
 
-function pill(id, { out = false, cap = null, isNew = false } = {}) {
+/** One player row, used everywhere: role, name, a context line, credits, C/VC and status. */
+function prow(id, { out = false, isNew = false, cap = null, sub = null, delta = null } = {}) {
   const p = P(id);
-  const tag = out ? '<u class="tg out">Out</u>' : isNew ? '<u class="tg in">In</u>' : '';
-  return `<li class="pl r-${p.role}${out ? ' out' : ''}${isNew ? ' new' : ''}" title="${esc(p.name)}, ${p.role}, ${p.credits} credits, ${esc(sides[p.side])}">
-    <i class="rl">${p.role}</i><span class="nm">${esc(p.name)}</span><span class="sub"><span class="cr">${p.credits} cr</span>${cap ? `<b class="cv">${cap}</b>` : ''}${tag}</span></li>`;
+  const slot = ctx.order.get(id);
+  // Batting slots only exist once the XIs are announced; before the toss they would leak who is playing.
+  const line = sub ?? (out ? 'Not in XI' : state.phase !== 'pre' && slot !== undefined ? `Bats ${slot + 1}, form ${p.form}` : `Form ${p.form}`);
+  const d = delta === null ? '' : `<em class="${delta > 0 ? 'up' : delta < 0 ? 'down' : ''}">${delta > 0 ? '+' : delta < 0 ? '−' : '±'}${Math.abs(delta)}</em>`;
+  return `<li class="prow r-${p.role}${out ? ' out' : ''}${isNew ? ' new' : ''}">
+    <i class="rl">${p.role}</i>
+    <span class="who"><span class="nm">${out ? '<span class="sr">Not playing: </span>' : ''}${esc(p.name)}</span><span class="sub"><b>${p.side}</b>${esc(line)}</span></span>
+    <span class="end">${cap ? `<b class="cv" title="${cap === 'C' ? 'Captain' : 'Vice-captain'}">${cap}</b>` : ''}${out ? '<span class="chip bad">Out</span>' : isNew ? '<span class="chip ok">In</span>' : ''}<span class="cr num">${p.credits}${d}</span></span></li>`;
 }
 
-function pills(ids, { captain = null, vc = null, outSet = null, newIds = [] } = {}) {
-  const rank = { WK: 0, BAT: 1, AR: 2, BOWL: 3 };
-  const sorted = [...ids].sort((a, b) => rank[P(a).role] - rank[P(b).role] || P(b).credits - P(a).credits);
-  return `<ul class="pills">${sorted.map((id) => pill(id, {
-    out: !!outSet && outSet.has(id), cap: id === captain ? 'C' : id === vc ? 'VC' : null, isNew: newIds.includes(id),
-  })).join('')}</ul>`;
-}
-
-/** Players grouped under role headings: denser, and the role chip is not repeated on every pill. */
-function pillsByRole(ids, opts = {}) {
-  const { captain = null, vc = null, newIds = [] } = opts;
-  return `<div class="groups">${ROLES.map((r) => {
+/** Players grouped under role headings with counts (the fantasy-app team view). */
+function rolesList(ids, { captain = null, vc = null, newIds = [], outSet = null } = {}) {
+  return `<div class="roles">${ROLES.map((r) => {
     const g = ids.filter((id) => P(id).role === r).sort((a, b) => P(b).credits - P(a).credits);
     if (!g.length) return '';
-    return `<section class="grp r-${r}"><h5>${r}<b>${g.length}</b></h5><ul class="pills one">${g.map((id) => pill(id, { cap: id === captain ? 'C' : id === vc ? 'VC' : null, isNew: newIds.includes(id) })).join('')}</ul></section>`;
+    return `<section class="rgrp r-${r}"><h4><i class="rl">${r}</i><span>${ROLE_NAME[r]}</span><b>${g.length}</b></h4><ul>${g.map((id) => prow(id, {
+      cap: id === captain ? 'C' : id === vc ? 'VC' : null, isNew: newIds.includes(id), out: !!outSet && outSet.has(id),
+    })).join('')}</ul></section>`;
   }).join('')}</div>`;
 }
 
-/** Role split bar + credits + side split for a set of 11 players. */
-function composition(ids, { legend = true } = {}) {
+/** The fantasy rule bar: players, per-side cap, credits, role limits. */
+function rules(ids, { available = null } = {}) {
   const s = teamStats(ids, ctx.pool);
-  const bar = ROLES.filter((r) => s.roles[r]).map((r) => `<i class="seg r-${r}" style="flex:${s.roles[r]}"></i>`).join('');
-  const legendHtml = ROLES.map((r) => `<span class="lg r-${r}"><i></i>${s.roles[r]} ${r}</span>`).join('');
-  return `<div class="comp"><div class="bar-roles" role="img" aria-label="Role split">${bar}</div>
-    ${legend ? `<div class="legend">${legendHtml}<span class="cl"><b>${fmt(s.credits)}</b> / 100 cr</span></div>` : ''}</div>`;
+  const avail = available ?? ids.length;
+  const rule = (ok, label, value, title = '') => `<span class="rule ${ok ? 'ok' : 'bad'}"${title ? ` title="${title}"` : ''}><span>${label}</span><b class="num">${value}</b></span>`;
+  return `<div class="rules" role="group" aria-label="Team rules">
+    ${rule(avail === LIMITS.total, 'Playing', `${avail}/${LIMITS.total}`)}
+    ${Object.entries(s.sides).map(([k, n]) => rule(n <= LIMITS.maxPerSide, k, `${n}/${LIMITS.maxPerSide}`, `At most ${LIMITS.maxPerSide} players from one side`)).join('')}
+    ${rule(s.credits <= LIMITS.credits, 'Credits', `${fmt(s.credits)}/${LIMITS.credits}`)}
+    ${ROLES.map((r) => rule(s.roles[r] >= LIMITS.roles[r][0] && s.roles[r] <= LIMITS.roles[r][1], r, s.roles[r], `${LIMITS.roles[r][0]} to ${LIMITS.roles[r][1]} allowed`).replace('class="rule ', 'class="rule role ')).join('')}
+  </div>`;
 }
 
-function leaders(team, { captain = team.captain, vc = team.vc, outSet = null } = {}) {
-  const one = (tag, id) => `<span class="ld${outSet && outSet.has(id) ? ' gone' : ''}"><b>${tag}</b>${esc(P(id).name)}</span>`;
-  return `<div class="leaders">${one('C', captain)}${one('VC', vc)}</div>`;
+/** 11 ticks: one per player. Red = not playing, accent = fixed, role colour = pre-toss composition. */
+function strip(team, mode) {
+  const out = new Set(state.fixes.get(team.id)?.out || []);
+  const ids = [...team.players].sort((a, b) => RANK[P(a).role] - RANK[P(b).role]);
+  return `<span class="strip" aria-hidden="true">${ids.map((id) => `<i class="${mode === 'roles' ? 'r-' + P(id).role : out.has(id) && mode === 'health' ? 'out' : mode === 'fixed' ? 'fx' : 'in'}"></i>`).join('')}</span>`;
 }
 
-/* ---------- team card ---------- */
-
-function swapRows(opt) {
-  return `<ul class="swaps">${opt.swaps.map((s) => {
-    const o = P(s.out), i = P(s.in);
-    const d = Math.round((i.credits - o.credits) * 10) / 10;
-    return `<li class="swap"><span class="from"><span class="sr">Out: </span><s>${esc(o.name)}</s></span>
-      <svg class="arr" viewBox="0 0 20 12" aria-hidden="true"><path d="M1 6h16m-5-5 5 5-5 5" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>
-      <span class="to r-${i.role}"><i class="rl">${i.role}</i><b>${esc(i.name)}</b></span>
-      <em class="num">${i.credits} cr <span class="${d > 0 ? 'up' : d < 0 ? 'down' : ''}">${d > 0 ? '+' : d < 0 ? '−' : '±'}${Math.abs(d)}</span></em></li>`;
-  }).join('')}</ul>`;
-}
-
-function leaderChange(team, opt) {
-  const one = (tag, was, now) => (was === now
-    ? `<span class="stay"><b>${tag}</b>${esc(P(now).name)} stays</span>`
-    : `<span><b>${tag}</b><span class="sr">was </span><s>${esc(P(was).name)}</s> to <strong>${esc(P(now).name)}</strong></span>`);
-  return `<div class="lchange">${one('C', team.captain, opt.captain)}${one('VC', team.vc, opt.vc)}</div>`;
-}
+/* ---------- repair decision ---------- */
 
 function explanation(team, fix, opt) {
   // AI text exists only for each team's best fix; every other option uses the built-in template.
@@ -99,82 +102,142 @@ function explanation(team, fix, opt) {
   return { text: explainTemplate(team, fix, opt, ctx, state.lang), ai: false };
 }
 
+function swapDiff(s) {
+  const o = P(s.out), i = P(s.in);
+  return `<li class="diff"><ul class="pair">${prow(s.out, { out: true })}${prow(s.in, { isNew: true, delta: Math.round((i.credits - o.credits) * 10) / 10 })}</ul></li>`;
+}
+
+function leaderDiff(team, opt) {
+  const one = (tag, was, now) => (was === now
+    ? `<li class="diff stay"><b class="cv">${tag}</b><span>${esc(P(now).name)} stays</span></li>`
+    : `<li class="diff"><ul class="pair lead"><li class="lrow out"><b class="cv">${tag}</b><span class="nm"><span class="sr">was </span>${esc(P(was).name)}</span></li><li class="lrow new"><b class="cv">${tag}</b><span class="nm">${esc(P(now).name)}</span></li></ul></li>`);
+  return `${one('C', team.captain, opt.captain)}${one('VC', team.vc, opt.vc)}`;
+}
+
+function decision(team, fix) {
+  const idx = state.pick.get(team.id) ?? 0;
+  const opt = fix.options[idx];
+  const x = explanation(team, fix, opt);
+  const beforeCr = 100 - teamStats(team.players, ctx.pool).credits;
+  return `<section class="decision" aria-label="Recommended fix">
+    <h3>Recommended fix</h3>
+    <div class="options" role="group" aria-label="Fix options for ${esc(team.name)}">
+      ${fix.options.map((o, i) => `<button class="opt" aria-pressed="${i === idx}" data-opt="${team.id}:${i}"><span class="o-t">${i === 0 ? 'Best fix' : 'Option ' + (i + 1)}</span><b class="o-g num">+${fmt(o.projGain)}</b><span class="o-m">proj pts</span><span class="o-m">${o.creditsLeft} cr left</span></button>`).join('')}
+    </div>
+    <div class="cmp" role="group" aria-label="Before and after this fix">
+      <div><span>Players out</span><b class="num">${fix.out.length}<i>to</i>0</b></div>
+      <div><span>Credits left</span><b class="num">${fmt(beforeCr)}<i>to</i>${fmt(opt.creditsLeft)}</b></div>
+      <div><span>Swaps</span><b class="num">${opt.swaps.length}</b></div>
+    </div>
+    <ul class="diffs">${opt.swaps.map(swapDiff).join('')}${leaderDiff(team, opt)}</ul>
+    <p class="why"${state.lang === 'hinglish' ? ' lang="hi-Latn"' : ''}><span class="src">${x.ai ? 'AI' : 'Built-in'}</span>${esc(x.text)}</p>
+    <div class="apply-row"><span class="a-sum"><b class="num">${opt.swaps.length}</b> ${opt.swaps.length === 1 ? 'swap' : 'swaps'}, <b class="num">${opt.creditsLeft}</b> cr left</span><button class="btn primary" data-apply="${team.id}">Apply fix</button></div>
+  </section>`;
+}
+
+/* ---------- team detail (workspace on desktop, bottom sheet on phones) ---------- */
+
 function scoreRow(team) {
   const r = state.result?.rows.find((x) => x.team.id === team.id);
   if (!r) return '';
   const gain = r.mine - r.none;
-  return `<div class="score"><div><span>Without fixing</span><b class="num">${fmt(r.none)}</b></div>
+  return `<div class="score" role="group" aria-label="Match points"><div><span>Without fixing</span><b class="num">${fmt(r.none)}</b></div>
     <div class="mine"><span>With my fixes</span><b class="num">${fmt(r.mine)}</b>${gain > 0 ? `<small class="num">+${fmt(gain)}</small>` : ''}</div>
     <div><span>Hindsight-best</span><b class="num">${fmt(r.hind)}</b></div></div>`;
 }
 
-function teamCard(team) {
+function detail(team) {
+  const head = (chips) => `<header class="rw-h"><h2>${esc(team.name)}</h2><div class="chips-row">${chips}</div></header>`;
   const fix = state.fixes.get(team.id);
+  if (state.phase === 'pre' || !fix) {
+    return `<article class="rw" data-team="${team.id}">${head('<span class="chip neutral">Valid</span>')}
+      ${rules(team.players)}<h3 class="sec-h">Team</h3>${rolesList(team.players, { captain: team.captain, vc: team.vc })}</article>`;
+  }
   const played = state.phase === 'played';
+  const applied = state.applied.get(team.id);
   if (!fix.broken) {
-    return `<article class="team fine"><header><h3>${esc(team.name)}</h3><span class="st ok">Fine</span></header>
-      <p class="line">All 11 players are in the playing XI. Nothing to fix.</p>
-      ${scoreRow(team)}${composition(team.players, { legend: false })}${leaders(team)}
-      <details class="more"><summary>View players</summary>${pillsByRole(team.players, { captain: team.captain, vc: team.vc })}</details></article>`;
+    return `<article class="rw fine" data-team="${team.id}">${head('<span class="chip ok solid">Fine</span>')}${scoreRow(team)}
+      <p class="lead-in">All 11 players are in the playing XI. Nothing to fix.</p>${rules(team.players)}
+      <h3 class="sec-h">Team</h3>${rolesList(team.players, { captain: team.captain, vc: team.vc })}</article>`;
+  }
+  if (applied) {
+    return `<article class="rw fixed" data-team="${team.id}">${head('<span class="chip ok solid">Fixed</span>')}${scoreRow(team)}
+      ${rules(applied.players)}
+      <section class="decision" aria-label="Applied fix"><h3>Applied fix</h3>
+        <ul class="diffs">${applied.swaps.map(swapDiff).join('')}${leaderDiff(team, applied)}</ul></section>
+      <h3 class="sec-h">New team</h3>${rolesList(applied.players, { captain: applied.captain, vc: applied.vc, newIds: applied.ins })}
+      ${played ? '' : `<div class="apply-row"><span class="a-sum">Not what you wanted?</span><button class="btn ghost" data-undo="${team.id}">Undo fix</button></div>`}</article>`;
   }
   const outSet = new Set(fix.out);
-  const alert = fix.captainOut ? '<span class="st bad soft">Captain out</span>' : fix.vcOut ? '<span class="st warn soft">VC out</span>' : '';
-  const applied = state.applied.get(team.id);
-  if (applied) {
-    return `<article class="team fixed"><header><h3>${esc(team.name)}</h3><span class="st ok">Fixed</span></header>
-      <p class="line"><span><b>${applied.swaps.length}</b> ${applied.swaps.length === 1 ? 'swap' : 'swaps'} applied</span><span class="cl"><b>${fmt(applied.stats.credits)}</b> / 100 cr</span></p>
-      ${scoreRow(team)}${composition(applied.players, { legend: false })}${leaderChange(team, applied)}
-      <details class="more"><summary>Swaps and new XI</summary>${swapRows(applied)}${pillsByRole(applied.players, { captain: applied.captain, vc: applied.vc, newIds: applied.ins })}</details>
-      ${played ? '' : `<button class="ghost" data-undo="${team.id}">Undo fix</button>`}</article>`;
-  }
-  if (fix.impossible) {
-    return `<article class="team broken"><header><h3>${esc(team.name)}</h3><span class="st bad">Broken</span>${alert}</header>
-      <p class="line"><span><b>${fix.out.length}</b> of 11 players are out</span></p>
-      ${scoreRow(team)}${composition(team.players, { legend: false })}${pills(fix.out, { captain: team.captain, vc: team.vc, outSet })}
-      <details class="more keep"><summary>${team.players.length - fix.out.length} still playing</summary>${pillsByRole(team.players.filter((id) => !outSet.has(id)), { captain: team.captain, vc: team.vc })}</details>
-      <div class="nofix"><b>No valid fix</b><p>${esc(noFixText(team, fix, ctx, state.lang))}</p></div></article>`;
-  }
-  const idx = state.pick.get(team.id) ?? 0;
-  const opt = fix.options[idx];
-  const x = explanation(team, fix, opt);
+  const alert = fix.captainOut ? '<span class="chip bad">Captain out</span>' : fix.vcOut ? '<span class="chip warn">VC out</span>' : '';
   const stay = team.players.filter((id) => !outSet.has(id));
-  return `<article class="team broken" data-team="${team.id}">
-    <header><h3>${esc(team.name)}</h3><span class="st bad">Broken</span>${alert}</header>
-    <p class="line"><span><b>${fix.out.length}</b> of 11 players are out</span><span class="cl"><b>${fmt(teamStats(team.players, ctx.pool).credits)}</b> / 100 cr</span></p>
-    ${scoreRow(team)}${composition(team.players, { legend: false })}
-    ${pills(fix.out, { captain: team.captain, vc: team.vc, outSet })}
-    <details class="more keep"><summary>${stay.length} still playing</summary>${pillsByRole(stay, { captain: team.captain, vc: team.vc })}</details>
-    <div class="opts" role="group" aria-label="Fix options for ${esc(team.name)}">
-      ${fix.options.map((o, i) => `<button aria-pressed="${i === idx}" data-opt="${team.id}:${i}"><span>${i === 0 ? 'Best fix' : 'Option ' + (i + 1)}</span><small class="num">+${fmt(o.projGain)} proj</small></button>`).join('')}
-    </div>
-    <div class="cmp" aria-label="Before and after this fix">
-      <div><span>Players out</span><b class="num">${fix.out.length}<i>to</i>0</b></div>
-      <div><span>Credits left</span><b class="num">${fmt(100 - teamStats(team.players, ctx.pool).credits)}<i>to</i>${fmt(opt.creditsLeft)}</b></div>
-      <div><span>Projected</span><b class="num pos">+${fmt(opt.projGain)}</b></div>
-    </div>
-    ${swapRows(opt)}${leaderChange(team, opt)}
-    <p class="why"${state.lang === 'hinglish' ? ' lang="hi-Latn"' : ''}><span class="src">${x.ai ? 'AI' : 'Built-in'}</span>${esc(x.text)}</p>
-    <footer><span class="left"><b class="num">${opt.creditsLeft}</b> cr left</span><button class="apply" data-apply="${team.id}">Apply fix</button></footer>
-  </article>`;
+  return `<article class="rw broken" data-team="${team.id}">${head(`<span class="chip bad solid">Broken</span>${alert}`)}${scoreRow(team)}
+    ${rules(team.players, { available: stay.length })}
+    <section class="out-sec" aria-label="Players not playing"><h3>Not playing <b class="num">${fix.out.length}</b></h3>
+      <ul class="plist">${fix.out.map((id) => prow(id, { out: true, cap: id === team.captain ? 'C' : id === team.vc ? 'VC' : null })).join('')}</ul></section>
+    ${fix.impossible
+    ? `<div class="nofix"><b>No valid fix</b><p${state.lang === 'hinglish' ? ' lang="hi-Latn"' : ''}>${esc(noFixText(team, fix, ctx, state.lang))}</p></div>`
+    : decision(team, fix)}
+    <details class="more keep"><summary>${stay.length} still playing</summary>${rolesList(stay, { captain: team.captain, vc: team.vc })}</details></article>`;
 }
 
-/* ---------- match header, toss, XIs ---------- */
+/* ---------- ledger (all eight teams at a glance) ---------- */
+
+const chev = '<svg class="chev" viewBox="0 0 8 14" aria-hidden="true"><path d="m1 1 6 6-6 6" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>';
+
+function teamRow(team) {
+  const fix = state.fixes.get(team.id);
+  const applied = state.applied.get(team.id);
+  const name = esc(team.name);
+  let kind, chip, line, mode, qa = '';
+  if (!fix.broken) {
+    kind = 'fine'; mode = 'health'; chip = '<span class="chip ok">Fine</span>'; line = '<span class="ok">All 11 playing</span>';
+  } else if (applied) {
+    kind = 'fixed'; mode = 'fixed'; chip = '<span class="chip ok">Fixed</span>';
+    line = `<span class="ok">${applied.swaps.length} ${applied.swaps.length === 1 ? 'swap' : 'swaps'} applied</span><span class="gain num">+${fmt(applied.projGain)}</span>`;
+  } else {
+    kind = 'broken'; mode = 'health'; chip = '<span class="chip bad">Broken</span>';
+    const flag = fix.captainOut ? '<span class="chip bad">C out</span>' : fix.vcOut ? '<span class="chip warn">VC out</span>' : '';
+    if (fix.impossible) line = `<span class="bad">${fix.out.length} out</span>${flag}<span class="bad">No valid fix</span>`;
+    else {
+      const best = fix.options[state.pick.get(team.id) ?? 0];
+      line = `<span class="bad">${fix.out.length} out</span>${flag}<span class="gain num">+${fmt(best.projGain)}</span>`;
+      qa = `<button class="qa" data-apply="${team.id}" aria-label="Apply best fix to ${name}">Fix</button>`;
+    }
+  }
+  const sel = isDesktop() && state.sel === team.id;
+  return `<div class="trow ${kind}${sel ? ' selected' : ''}${state.flash.has(team.id) ? ' flash' : ''}">
+    <button class="open" data-open="${team.id}"${sel ? ' aria-current="true"' : ''}><span class="r1"><span class="tn">${name}</span>${chip}</span><span class="r2">${strip(team, mode)}<span class="ts">${line}</span></span></button>${qa}</div>`;
+}
+
+function preRow(team) {
+  const sel = isDesktop() && state.sel === team.id;
+  return `<div class="trow pre${sel ? ' selected' : ''}"><button class="open" data-open="${team.id}"${sel ? ' aria-current="true"' : ''}>
+    <span class="r1"><span class="tn">${esc(team.name)}</span><span class="cl num">${fmt(teamStats(team.players, ctx.pool).credits)} / 100 cr</span></span>
+    <span class="r2">${strip(team, 'roles')}</span>
+    <span class="r3"><span class="ld"><b class="cv">C</b>${esc(P(team.captain).name)}</span><span class="ld"><b class="cv">VC</b>${esc(P(team.vc).name)}</span></span></button>${chev}</div>`;
+}
+
+function resultRow(team) {
+  const e = state.result;
+  const r = e.rows.find((x) => x.team.id === team.id);
+  const max = Math.max(...e.rows.map((x) => x.hind), 1);
+  const w = (v) => `${(v / max) * 100}%`;
+  const gain = r.mine - r.none;
+  const sel = isDesktop() && state.sel === team.id;
+  return `<div class="trow result${sel ? ' selected' : ''}"><button class="open" data-open="${team.id}"${sel ? ' aria-current="true"' : ''}>
+    <span class="r1"><span class="tn">${esc(team.name)}</span><span class="rg num ${gain > 0 ? 'pos' : ''}">${gain > 0 ? '+' + fmt(gain) : 'no change'}</span></span>
+    <span class="stack" role="img" aria-label="Without ${fmt(r.none)}, with fixes ${fmt(r.mine)}, hindsight best ${fmt(r.hind)}"><i class="s0" style="width:${w(r.none)}"></i><i class="s1" style="width:${w(gain)}"></i><i class="s2" style="width:${w(r.hind - r.mine)}"></i></span>
+    <span class="rnums num"><span><i class="s0"></i>${fmt(r.none)}</span><span><i class="s1"></i>${fmt(r.mine)}</span><span><i class="s2"></i>${fmt(r.hind)}</span></span></button>${chev}</div>`;
+}
+
+/* ---------- scoreboard, impact, rail ---------- */
 
 function topbar() {
   return `<header class="top"><div class="brand">
       <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="10" fill="none" stroke="currentColor" stroke-width="2"/><path d="M6 6.5c3 2.5 3 8.5 0 11M18 6.5c-3 2.5-3 8.5 0 11" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>
       <h1>Toss Panic Fixer</h1></div>
     <span class="sample" title="Fictional players and a generated match">SAMPLE (simulated)</span></header>`;
-}
-
-function matchHeader() {
-  const status = state.phase === 'pre' ? 'Pre-toss, XIs not announced' : state.phase === 'toss' ? 'Toss done, XIs confirmed' : 'Match played';
-  return `<section class="match" aria-label="Match">
-    <div class="tm"><i class="crest">BAY</i><b>${esc(sides.BAY)}</b></div>
-    <div class="vs"><span>vs</span></div>
-    <div class="tm r"><b>${esc(sides.DSH)}</b><i class="crest">DSH</i></div>
-    <div class="meta"><span class="stat-dot ${state.phase}"></span>${status}<span class="venue">${esc(match.info.match_type)} at ${esc(match.info.venue)}</span></div>
-  </section>`;
 }
 
 function impact() {
@@ -184,28 +247,66 @@ function impact() {
   const caps = aff.filter((f) => f.captainOut).length;
   const vcs = aff.filter((f) => f.vcOut).length;
   const fine = fixes.length - aff.length;
-  return `<section class="impact" data-panel="teams" aria-label="Impact summary">
-    <div class="hero"><b class="num">${aff.length}<small>/${teams.length}</small></b><span>teams broken<i> by the toss</i><em>${fine} ${fine === 1 ? 'team is' : 'teams are'} fine</em></span></div>
-    <div class="cell"><b class="num warn">${outIds.size}</b><span>players out</span></div>
-    <div class="cell"><b class="num bad">${caps}</b><span>captains out</span></div>
-    <div class="cell"><b class="num warn">${vcs}</b><span>VCs out</span></div>
+  const n = (v) => `<b class="num" data-count="${v}">${v}</b>`;
+  return `<div class="impact" role="group" aria-label="Impact summary">
+    <div class="hero">${n(aff.length)}<small class="num">/${teams.length}</small><span>teams broken<i> by the toss</i><em>${fine} ${fine === 1 ? 'team is' : 'teams are'} fine</em></span></div>
+    <div class="cell">${n(outIds.size)}<span>players out</span></div>
+    <div class="cell">${n(caps)}<span>captains out</span></div>
+    <div class="cell">${n(vcs)}<span>VCs out</span></div>
+  </div>`;
+}
+
+function resultBand() {
+  const e = state.result;
+  const pct = e.recovered === null ? 'n/a' : `${e.recovered}%`;
+  return `<div class="rband" role="group" aria-label="Result"><b class="num">${pct}</b><span>of the gap recovered<em class="num">${fmt(e.totals.mine - e.totals.none)} of ${fmt(e.totals.hind - e.totals.none)} points</em></span></div>`;
+}
+
+function scoreboard() {
+  const toss = state.phase !== 'pre';
+  const t = meta.toss;
+  const status = state.phase === 'pre' ? 'Pre-toss' : state.phase === 'toss' ? 'Toss done' : 'Full time';
+  const o = match.info.outcome;
+  const by = o?.by ? Object.entries(o.by)[0] : null;
+  const line = state.phase === 'pre'
+    ? '<p class="b-line muted">Playing XIs are announced at the toss</p>'
+    : state.phase === 'toss'
+      ? `<p class="b-line"><b>${esc(t.winner)}</b> won the toss and chose to ${esc(t.decision)}</p>`
+      : `<p class="b-line"><b>${esc(o.winner)}</b> won${by ? ` by ${by[1]} ${esc(by[0])}` : ''}<span class="muted"> (simulated)</span></p>`;
+  const team = (k, right) => `<div class="b-team${right ? ' r' : ''}"><i class="crest">${k}</i><span><b>${esc(sides[k])}</b>${toss ? `<small>${meta.xiOrder[k].length} confirmed</small>` : '<small>XI to be announced</small>'}</span></div>`;
+  return `<section class="board" aria-label="Match">
+    <div class="b-main">
+      <div class="b-top"><span class="b-status ${state.phase}"><i></i>${status}</span><span class="b-meta">${esc(match.info.match_type)} at ${esc(match.info.venue)}</span></div>
+      <div class="b-teams">${team('BAY', false)}<span class="b-vs">vs</span>${team('DSH', true)}</div>
+      ${line}
+    </div>
+    ${state.phase === 'toss' ? impact() : state.phase === 'played' ? resultBand() : ''}
   </section>`;
 }
 
 function xiRow(id, i) {
   const p = P(id);
-  return `<li class="xr r-${p.role}" style="--i:${i}"><span class="nm"><em>${i + 1}</em>${esc(p.name)}</span><span class="sub"><i class="rl">${p.role}</i><span class="cr">${p.credits} cr</span></span></li>`;
+  const n = exposure.get(id) || 0;
+  return `<li class="xr r-${p.role}" style="--i:${i}"><span class="bo">${i + 1}</span><i class="rl">${p.role}</i>
+    <span class="who"><span class="nm">${esc(p.name)}</span><span class="sub${n ? ' has' : ''}">${n ? `In ${n} of ${teams.length} teams` : 'Not in any team'}</span></span><span class="cr num">${p.credits}</span></li>`;
 }
 
-function tossNews() {
-  const t = meta.toss;
-  const benched = (s) => meta.squads[s].filter((p) => !ctx.xi.has(p.id));
-  const side = (s) => `<div class="xi-side"><h3>${esc(sides[s])}</h3>
-      <ol>${meta.xiOrder[s].map(xiRow).join('')}</ol>
-      ${benched(s).length ? `<p class="bench">Not playing</p><ul class="benchlist">${benched(s).map((p) => `<li class="r-${p.role}"><i class="rl">${p.role}</i><s>${esc(p.name)}</s></li>`).join('')}</ul>` : ''}</div>`;
-  return `<section class="news" data-panel="xi"><h2 class="sr">Toss and playing XIs</h2><div class="lower"><b>${esc(t.winner)}</b> won the toss and chose to ${esc(t.decision)}</div>
-    <ul class="notes">${meta.notes.map((n) => `<li>${esc(n)}</li>`).join('')}</ul>
-    <details class="xi" ${state.xiOpen ? 'open' : ''}><summary>Confirmed playing XIs</summary><div class="xi-grid">${side('BAY')}${side('DSH')}</div></details></section>`;
+function xiPanel() {
+  const notes = meta.notes.map((n) => {
+    const pl = players.find((p) => n.includes(p.name));
+    const ex = pl ? exposure.get(pl.id) || 0 : 0;
+    return `<li><span>${esc(n)}</span>${ex ? `<span class="chip warn">In ${ex} of ${teams.length} teams</span>` : ''}</li>`;
+  }).join('');
+  const side = state.xiSide;
+  const benched = meta.squads[side].filter((p) => !ctx.xi.has(p.id));
+  return `<section class="card news" data-panel="xi"><h2>Playing XIs</h2>
+    <ul class="notes">${notes}</ul>
+    <div class="seg-switch" role="group" aria-label="Choose a side">${Object.entries(sides).map(([k, name]) => `<button data-xi="${k}" aria-pressed="${k === side}">${esc(name)}</button>`).join('')}</div>
+    <ol class="xi">${meta.xiOrder[side].map(xiRow).join('')}</ol>
+    ${benched.length ? `<h3 class="sec-h">Not playing</h3><ul class="plist">${benched.map((p) => {
+    const n = exposure.get(p.id) || 0;
+    return prow(p.id, { out: true, sub: n ? `In ${n} of ${teams.length} teams` : 'Not in any team' });
+  }).join('')}</ul>` : ''}</section>`;
 }
 
 function coinOverlay() {
@@ -229,25 +330,21 @@ function askBox() {
   const a = state.ask;
   const chips = ['Who should captain Powerplay Pandits?', 'Can I swap Mohit Saxena for Siddharth Rao in t1?', 'Which of my teams has no valid fix?'];
   const open = state.askOpen || a.q || a.answer || a.error || a.loading;
-  return `<details class="ask" data-panel="ask" ${open ? 'open' : ''}><summary><h2>Ask the Fixer</h2><span>Check any swap against the real rules</span></summary>
+  return `<details class="ask card" data-panel="ask" ${open ? 'open' : ''}><summary><h2>Ask the Fixer</h2><span>Check any swap against the real rules</span></summary>
     <form data-ask><input name="q" maxlength="300" placeholder="e.g. Is swapping Tejas Naik for Harsh Menon valid in t1?" value="${esc(a.q)}" aria-label="Your question" autocomplete="off">
-      <button class="apply" ${a.loading ? 'disabled' : ''}>${a.loading ? 'Checking…' : 'Ask'}</button></form>
+      <button class="btn primary" ${a.loading ? 'disabled' : ''}>${a.loading ? 'Checking…' : 'Ask'}</button></form>
     <div class="chips">${chips.map((c) => `<button type="button" data-chip="${esc(c)}">${esc(c)}</button>`).join('')}</div>
     <div aria-live="polite">${a.answer ? `<div class="answer"><p>${esc(a.answer)}</p><small>Checked with the real engine: ${a.tools.length ? a.tools.map((t) => `<code>${esc(t)}</code>`).join(' ') : 'no tools used'}. Projections use pre-match form only.</small></div>` : ''}
     ${a.error ? `<p class="aierr">${esc(a.error)}</p>` : ''}</div></details>`;
 }
 
-/* ---------- full time ---------- */
-
 function fullTime() {
   const e = state.result;
-  const pct = e.recovered === null ? 'n/a' : `${e.recovered}%`;
   const max = Math.max(e.totals.hind, e.totals.mine, e.totals.none, 1);
   const w = (v) => `${Math.max(2, Math.round((v / max) * 100))}%`;
   const line = (cls, label, v, extra = '') => `<div class="inn ${cls}"><div class="il"><span>${label}</span><b class="num">${fmt(v)}</b></div><div class="track"><i style="width:${w(v)}"></i></div>${extra}</div>`;
-  return `<section class="fulltime" data-panel="teams" aria-label="Full time">
+  return `<section class="card fulltime" data-panel="teams" aria-label="Full time">
     <div class="ft-head"><h2>Full time</h2><span class="sample sm">SAMPLE (simulated)</span></div>
-    <div class="rec"><b class="num">${pct}</b><span>of the gap recovered<em class="num">${fmt(e.totals.mine - e.totals.none)} of ${fmt(e.totals.hind - e.totals.none)} points</em></span></div>
     ${line('none', 'Without fixing', e.totals.none)}
     ${line('mine', 'With my fixes', e.totals.mine, `<p class="rcv num">+${fmt(e.totals.mine - e.totals.none)} recovered</p>`)}
     ${line('hind', 'Hindsight-best', e.totals.hind)}
@@ -265,48 +362,25 @@ function footerBar() {
   return `<button class="cta" data-act="reset">Start over</button>`;
 }
 
-/* ---------- phone: list rows, result rows, bottom sheet, tabs ---------- */
-
-const chev = '<svg class="chev" viewBox="0 0 8 14" aria-hidden="true"><path d="m1 1 6 6-6 6" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>';
-
-function teamRow(team) {
-  const fix = state.fixes.get(team.id);
-  const applied = state.applied.get(team.id);
-  const name = esc(team.name);
-  const open = (inner) => `<button class="open" data-open="${team.id}">${inner}</button>`;
-  if (!fix.broken) {
-    return `<div class="trow fine">${open(`<span class="tn">${name}</span><span class="ts ok">All 11 playing</span>`)}<span class="pillst ok">Fine</span>${chev}</div>`;
+function context() {
+  if (state.phase === 'pre') {
+    return `<div class="context" role="region" aria-label="Before the toss"><section class="card intro"><h2>Before the toss</h2>
+      <p>Your ${teams.length} teams are all valid right now. When the toss happens, the playing XIs drop and any player who is not in them scores zero.</p>
+      <p>Select a team to see its players, credits and captain choices.</p></section></div>`;
   }
-  if (applied) {
-    return `<div class="trow fixed">${open(`<span class="tn">${name}</span><span class="ts ok">${applied.swaps.length} ${applied.swaps.length === 1 ? 'swap' : 'swaps'} applied, +${fmt(applied.projGain)} proj</span>`)}<span class="pillst ok">Fixed</span>${chev}</div>`;
-  }
-  const flag = fix.captainOut ? '<span class="fl bad">Captain out</span>' : fix.vcOut ? '<span class="fl warn">VC out</span>' : '';
-  if (fix.impossible) {
-    return `<div class="trow broken">${open(`<span class="tn">${name}</span><span class="ts"><span class="bad">${fix.out.length} out</span>${flag}<span class="bad">No valid fix</span></span>`)}${chev}</div>`;
-  }
-  const best = fix.options[state.pick.get(team.id) ?? 0];
-  return `<div class="trow broken">${open(`<span class="tn">${name}</span><span class="ts"><span class="bad">${fix.out.length} out</span>${flag}<span class="gain num">+${fmt(best.projGain)} proj</span></span>`)}<button class="qa" data-apply="${team.id}" aria-label="Apply best fix to ${name}">Fix</button></div>`;
+  if (state.phase === 'toss') return `<div class="context" role="region" aria-label="Playing XIs and Ask the Fixer">${xiPanel()}${askBox()}</div>`;
+  return `<div class="context" role="region" aria-label="Result summary">${fullTime()}</div>`;
 }
 
-function resultRow(team) {
-  const e = state.result;
-  const r = e.rows.find((x) => x.team.id === team.id);
-  const max = Math.max(...e.rows.map((x) => x.hind), 1);
-  const w = (v) => `${(v / max) * 100}%`;
-  const gain = r.mine - r.none;
-  return `<div class="trow result"><button class="open" data-open="${team.id}">
-    <span class="rtop"><span class="tn">${esc(team.name)}</span><span class="rg num ${gain > 0 ? 'pos' : ''}">${gain > 0 ? '+' + fmt(gain) : 'no change'}</span></span>
-    <span class="stack" role="img" aria-label="Without ${fmt(r.none)}, with fixes ${fmt(r.mine)}, hindsight best ${fmt(r.hind)}"><i class="s0" style="width:${w(r.none)}"></i><i class="s1" style="width:${w(gain)}"></i><i class="s2" style="width:${w(r.hind - r.mine)}"></i></span>
-    <span class="rnums num"><span><i class="s0"></i>${fmt(r.none)}</span><span><i class="s1"></i>${fmt(r.mine)}</span><span><i class="s2"></i>${fmt(r.hind)}</span></span></button>${chev}</div>`;
-}
+/* ---------- phone: tabs, bottom sheet, toast ---------- */
 
 function sheet() {
   const team = teams.find((t) => t.id === state.sheet);
   if (!team) return '';
-  return `<div class="sheet-wrap"><div class="sheet" role="dialog" aria-modal="true" aria-label="${esc(team.name)}, repair details" tabindex="-1">
+  return `<div class="sheet-wrap"><div class="sheet" role="dialog" aria-modal="true" aria-label="${esc(team.name)}, team details" tabindex="-1">
     <div class="grab" aria-hidden="true"></div>
     <button class="x" data-closesheet aria-label="Close"><svg viewBox="0 0 14 14" aria-hidden="true"><path d="m2 2 10 10M12 2 2 12" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg></button>
-    <div class="sheet-body">${teamCard(team)}</div></div></div>`;
+    <div class="sheet-body" role="region" aria-label="${esc(team.name)} details" tabindex="0">${detail(team)}</div></div></div>`;
 }
 
 function tabs() {
@@ -323,11 +397,6 @@ function showToast(msg) {
   el.className = 'show';
   clearTimeout(showToast.t);
   showToast.t = setTimeout(() => { el.className = ''; }, 2400);
-}
-
-function preCard(t) {
-  return `<article class="team pre"><details><summary><span class="sm-h"><h3>${esc(t.name)}</h3><span class="cl"><b>${fmt(teamStats(t.players, ctx.pool).credits)}</b> / 100 cr</span></span>
-    ${composition(t.players, { legend: false })}${leaders(t)}</summary>${pillsByRole(t.players, { captain: t.captain, vc: t.vc })}</details></article>`;
 }
 
 /* ---------- focus management: render() rebuilds the DOM, so keyboard focus must be put back ---------- */
@@ -347,6 +416,14 @@ const FOCUS_FALLBACK = {
 };
 let wasSheet = false;
 let opener = null;
+const visible = (q) => [...document.querySelectorAll(q)].find((n) => n.offsetParent !== null);
+
+/* ---------- render ---------- */
+
+function ensureSel() {
+  const list = ordered();
+  if (!list.some((t) => t.id === state.sel)) state.sel = list[0].id;
+}
 
 function render() {
   const app = $('#app');
@@ -354,38 +431,32 @@ function render() {
   const sel = focusSelector(active);
   const [fk, fv] = Object.entries(active?.dataset || {})[0] || [];
   const caret = active?.name ? [active.selectionStart, active.selectionEnd] : null;
-  let side = '';
-  let main = '';
-  if (state.phase === 'pre') {
-    side = `<section class="intro"><h2>Before the toss</h2>
-      <p>Your ${teams.length} teams are all valid right now. When the toss happens, the playing XIs drop and any player who is not in them scores zero.</p></section>`;
-    main = `<div class="list-h"><h2>Your ${teams.length} teams</h2><span class="allvalid">All valid</span></div>${teams.map(preCard).join('')}`;
-  } else if (state.phase === 'toss') {
-    const ordered = [...teams].sort((a, b) => Number(state.fixes.get(b.id).broken) - Number(state.fixes.get(a.id).broken));
-    side = `${impact()}${tossNews()}${askBox()}`;
-    main = `<div class="list-h"><h2>Your teams</h2>${langToggle()}</div>
-      <div class="dcards">${ordered.map(teamCard).join('')}</div><div class="mrows">${ordered.map(teamRow).join('')}</div>`;
-  } else {
-    side = fullTime();
-    main = `<div class="list-h"><h2>Team by team</h2>${langToggle()}</div>
-      <p class="rlegend"><span><i class="s0"></i>Without</span><span><i class="s1"></i>With my fixes</span><span><i class="s2"></i>Hindsight-best</span></p>
-      <div class="dcards">${teams.map(teamCard).join('')}</div><div class="mrows">${teams.map(resultRow).join('')}</div>`;
-  }
   const sheetBody = $('.sheet-body');
   const keep = sheetBody ? sheetBody.scrollTop : 0;
+
+  ensureSel();
+  const rows = state.phase === 'pre' ? teams.map(preRow) : state.phase === 'toss' ? ordered().map(teamRow) : teams.map(resultRow);
+  const legend = state.phase === 'played'
+    ? '<p class="rlegend" data-panel="teams"><span><i class="s0"></i>Without</span><span><i class="s1"></i>With my fixes</span><span><i class="s2"></i>Hindsight-best</span></p>' : '';
+  const ledger = `<section class="ledger" aria-label="Your teams"><div class="ledger-in">
+      <div class="list-h" data-panel="teams"><h2>Your ${teams.length} teams</h2>${state.phase === 'pre' ? '<span class="allvalid">All valid</span>' : langToggle()}</div>
+      ${legend}<div class="rows" data-panel="teams">${rows.join('')}</div>
+      <nav class="bar" aria-label="Actions">${footerBar()}</nav></div></section>`;
+  const workspace = `<section class="workspace${state.animateSel ? ' enter' : ''}" aria-label="Team detail">${detail(teams.find((t) => t.id === state.sel))}</section>`;
+  state.animateSel = false;
+
   app.className = state.fresh ? 'fresh' : '';
   if (state.phase === 'toss') app.dataset.tab = state.tab; else delete app.dataset.tab;
   // While the sheet or toss dialog is open, the page behind it is inert: no focus, no screen-reader reach.
   const inert = state.sheet || state.coin ? ' inert' : '';
-  app.innerHTML = `<a class="skip" href="#teams-main">Skip to teams</a><div class="page"${inert}>${topbar()}${matchHeader()}${state.phase === 'toss' ? tabs() : ''}<main id="teams-main" tabindex="-1"><div class="shell"><div class="rail" role="region" aria-label="Match summary and actions">${side}<nav class="bar" aria-label="Actions">${footerBar()}</nav></div><section class="teamlist" data-panel="teams" aria-label="Your teams">${main}</section></div></main></div>${state.sheet ? sheet() : ''}${state.coin ? coinOverlay() : ''}`;
+  app.innerHTML = `<a class="skip" href="#teams-main">Skip to teams</a><div class="page"${inert}>${topbar()}${scoreboard()}${state.phase === 'toss' ? tabs() : ''}<main id="teams-main" tabindex="-1"><div class="shell">${ledger}${workspace}${context()}</div></main></div>${state.sheet ? sheet() : ''}${state.coin ? coinOverlay() : ''}`;
   document.documentElement.classList.toggle('lock', !!state.sheet);
   if (state.sheet && keep) $('.sheet-body').scrollTop = keep;
 
   if (state.sheet && !wasSheet) $('.sheet')?.focus();
   else if (state.coin) $('#coin')?.focus();
-  else if (!state.sheet && wasSheet && opener) { [...document.querySelectorAll(`[data-open="${opener}"]`)].find((n) => n.offsetParent !== null)?.focus({ preventScroll: true }); }
+  else if (!state.sheet && wasSheet && opener) visible(`[data-open="${opener}"]`)?.focus({ preventScroll: true });
   else if (sel) {
-    const visible = (q) => [...document.querySelectorAll(q)].find((n) => n.offsetParent !== null);
     const target = visible(sel) || (FOCUS_FALLBACK[fk] || (() => []))(fv).map(visible).find(Boolean);
     if (target) { target.focus({ preventScroll: true }); if (caret && target.setSelectionRange) target.setSelectionRange(...caret); }
   }
@@ -400,16 +471,34 @@ function endCoin() {
   $('#teams-main')?.focus({ preventScroll: true });
 }
 
+function countUp() {
+  if (reduceMotion()) return;
+  for (const el of document.querySelectorAll('.impact [data-count]')) {
+    const to = Number(el.dataset.count);
+    const t0 = performance.now();
+    const step = (now) => {
+      const k = Math.min(1, (now - t0) / 700);
+      el.textContent = String(Math.round(to * (1 - (1 - k) ** 3)));
+      if (k < 1 && document.body.contains(el)) requestAnimationFrame(step); else el.textContent = String(to);
+    };
+    el.textContent = '0';
+    requestAnimationFrame(step);
+  }
+}
+
 function toss() {
   for (const t of teams) state.fixes.set(t.id, fixTeam(t, ctx));
   state.phase = 'toss';
   state.coin = !reduceMotion();
   state.fresh = true;
+  state.sel = ordered()[0].id;
   render();
   window.scrollTo({ top: 0 });
-  if (state.coin) setTimeout(endCoin, 2300);
+  if (state.coin) setTimeout(() => { endCoin(); countUp(); }, 2300); else countUp();
   setTimeout(() => { state.fresh = false; $('#app').classList.remove('fresh'); }, 3600);
 }
+
+/* ---------- actions ---------- */
 
 async function runExplain() {
   const lang = state.lang;
@@ -430,41 +519,36 @@ async function runAsk(q) {
   render();
 }
 
-document.addEventListener('submit', (e) => {
-  if (!e.target.matches('[data-ask]')) return;
-  e.preventDefault();
-  const q = new FormData(e.target).get('q').trim();
-  if (q.length >= 3 && !state.ask.loading) runAsk(q);
-});
-document.addEventListener('input', (e) => { if (e.target.name === 'q') state.ask.q = e.target.value; });
+function settleFlash() {
+  setTimeout(() => { state.flash = new Set(); document.querySelectorAll('.trow.flash').forEach((n) => n.classList.remove('flash')); }, 1100);
+}
 
-document.addEventListener('click', (e) => {
-  const b = e.target.closest('button');
-  if (!b) return;
-  const d = b.dataset;
-  if (d.chip) { state.ask.q = d.chip; render(); return; }
-  if (d.act === 'explain') runExplain();
-  else if (d.act === 'toss') toss();
-  else if (d.act === 'fixall') {
-    for (const [id, f] of state.fixes) if (f.options.length && !state.applied.has(id)) state.applied.set(id, f.options[state.pick.get(id) ?? 0]);
-    render();
-  } else if (d.act === 'play') {
-    state.result = evaluate(teams, state.applied, ctx, actual);
-    state.phase = 'played';
-    render();
-    window.scrollTo({ top: 0 });
-  } else if (d.act === 'reset') {
-    state.phase = 'pre'; state.fixes.clear(); state.pick.clear(); state.applied.clear(); state.result = null; state.ai = { en: null, hinglish: null, loading: false, error: '' }; state.ask = { q: '', loading: false, answer: '', tools: [], error: '' }; state.tab = 'teams'; state.sheet = null;
-    render(); window.scrollTo({ top: 0 });
-  } else if (d.apply) { state.applied.set(d.apply, state.fixes.get(d.apply).options[state.pick.get(d.apply) ?? 0]); render(); }
-  else if (d.undo) { state.applied.delete(d.undo); render(); }
-  else if (d.opt) { const [id, i] = d.opt.split(':'); state.pick.set(id, Number(i)); render(); }
-  else if (d.lang) { state.lang = d.lang; render(); }
-});
+function applyFix(id) {
+  const fix = state.fixes.get(id);
+  state.applied.set(id, fix.options[state.pick.get(id) ?? 0]);
+  state.flash = new Set([id]);
+  const hadSheet = !!state.sheet;
+  state.sheet = null;
+  if (isDesktop()) {
+    // Triage flow: jump to the next team that still needs a decision.
+    const list = ordered();
+    const from = list.findIndex((t) => t.id === id);
+    const next = [...list.slice(from + 1), ...list.slice(0, from)].find((t) => {
+      const f = state.fixes.get(t.id);
+      return f.broken && !f.impossible && !state.applied.has(t.id);
+    });
+    if (next && state.sel === id) { state.sel = next.id; state.animateSel = true; }
+  }
+  render();
+  settleFlash();
+  if (hadSheet && history.state?.sheet) history.back();
+  showToast(`${teams.find((t) => t.id === id).name} fixed`);
+}
 
-document.addEventListener('click', (e) => { if (e.target.closest('#coin')) endCoin(); });
-
-// Phone navigation: tabs, bottom sheet (with browser back support), and action feedback.
+function openTeam(id) {
+  if (isDesktop()) { if (state.sel !== id) { state.sel = id; state.animateSel = true; } render(); return; }
+  openSheet(id);
+}
 function openSheet(id) {
   opener = id;
   state.sheet = id;
@@ -476,6 +560,51 @@ function closeSheet() {
   else { state.sheet = null; render(); }
 }
 window.addEventListener('popstate', () => { if (state.sheet) { state.sheet = null; render(); } });
+
+document.addEventListener('submit', (e) => {
+  if (!e.target.matches('[data-ask]')) return;
+  e.preventDefault();
+  const q = new FormData(e.target).get('q').trim();
+  if (q.length >= 3 && !state.ask.loading) runAsk(q);
+});
+document.addEventListener('input', (e) => { if (e.target.name === 'q') state.ask.q = e.target.value; });
+
+document.addEventListener('click', (e) => {
+  if (e.target.closest?.('.skip')) { e.preventDefault(); $('#teams-main')?.focus(); return; }
+  if (e.target.closest?.('#coin')) { endCoin(); countUp(); return; }
+  if (e.target.classList?.contains('sheet-wrap')) return closeSheet();
+  const b = e.target.closest('button');
+  if (!b) return;
+  const d = b.dataset;
+  if (d.chip) { state.ask.q = d.chip; render(); }
+  else if (d.act === 'explain') runExplain();
+  else if (d.act === 'toss') toss();
+  else if (d.act === 'fixall') {
+    state.flash = new Set();
+    for (const [id, f] of state.fixes) if (f.options.length && !state.applied.has(id)) { state.applied.set(id, f.options[state.pick.get(id) ?? 0]); state.flash.add(id); }
+    render(); settleFlash();
+    showToast(`Fixed ${state.applied.size} teams`);
+  } else if (d.act === 'play') {
+    state.result = evaluate(teams, state.applied, ctx, actual);
+    state.phase = 'played';
+    render();
+    window.scrollTo({ top: 0 });
+  } else if (d.act === 'reset') {
+    state.phase = 'pre'; state.fixes.clear(); state.pick.clear(); state.applied.clear(); state.result = null;
+    state.ai = { en: null, hinglish: null, loading: false, error: '' };
+    state.ask = { q: '', loading: false, answer: '', tools: [], error: '' };
+    state.tab = 'teams'; state.sheet = null; state.sel = null; state.xiSide = 'BAY'; state.flash = new Set();
+    render(); window.scrollTo({ top: 0 });
+  } else if (d.apply) applyFix(d.apply);
+  else if (d.undo) { state.applied.delete(d.undo); render(); }
+  else if (d.opt) { const [id, i] = d.opt.split(':'); state.pick.set(id, Number(i)); render(); }
+  else if (d.lang) { state.lang = d.lang; render(); }
+  else if (d.open) openTeam(d.open);
+  else if (d.closesheet !== undefined) closeSheet();
+  else if (d.tab) { state.tab = d.tab; render(); window.scrollTo({ top: 0 }); }
+  else if (d.xi) { state.xiSide = d.xi; render(); }
+});
+
 document.addEventListener('keydown', (e) => {
   if (e.key === 'Tab' && (state.sheet || state.coin)) {
     const box = $(state.coin ? '#coin' : '.sheet');
@@ -488,37 +617,14 @@ document.addEventListener('keydown', (e) => {
     return;
   }
   if (e.key !== 'Escape') return;
-  if (state.coin) endCoin();
-  else if (state.sheet) closeSheet();
+  if (state.coin) { endCoin(); countUp(); } else if (state.sheet) closeSheet();
 });
-// Skip link: move focus without adding a history entry (the sheet uses history for the back button).
-document.addEventListener('click', (e) => {
-  if (!e.target.closest?.('.skip')) return;
-  e.preventDefault();
-  $('#teams-main')?.focus();
-});
-document.addEventListener('click', (e) => {
-  if (e.target.classList?.contains('sheet-wrap')) return closeSheet();
-  const b = e.target.closest('button');
-  if (!b) return;
-  const d = b.dataset;
-  if (d.open) openSheet(d.open);
-  else if (d.closesheet !== undefined) closeSheet();
-  else if (d.tab) { state.tab = d.tab; render(); window.scrollTo({ top: 0 }); }
-  else if (d.apply) {
-    const name = teams.find((t) => t.id === d.apply).name;
-    const wasSheet = !!state.sheet;
-    state.sheet = null; render();
-    if (wasSheet && history.state?.sheet) history.back();
-    showToast(`${name} fixed`);
-  } else if (d.act === 'fixall') showToast(`Fixed ${state.applied.size} teams`);
-});
+
 // <details> does not bubble 'toggle'; capture it so the open state survives re-renders.
 document.addEventListener('toggle', (e) => {
-  if (e.target.matches('details.xi')) state.xiOpen = e.target.open;
   if (e.target.matches('details.ask')) state.askOpen = e.target.open;
 }, true);
 
 render();
 // Exposed for tests and for debugging in the console.
-window.__tpf = { state, findBroken };
+window.__tpf = { state };
