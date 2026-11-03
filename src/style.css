@@ -345,3 +345,12 @@ b.cv { display: inline-grid; place-items: center; min-width: 22px; height: 20px;
 @media (min-width: 1400px) { .shell { grid-template-columns: 360px minmax(0, 1fr) 360px; } }
 @media (prefers-reduced-motion: reduce) { *, *::before, *::after { animation: none !important; transition: none !important; } }
 .rw > .sec-h { margin-bottom: -16px; }
+
+/* host badge (see app.js): keep phone controls clear of a fixed corner badge */
+@media (max-width: 899px) {
+  .host-badge .bar { bottom: 70px; }
+  .host-badge #app { padding-bottom: 200px; }
+  .host-badge .sheet-wrap { padding-bottom: 70px; }
+  .host-badge .sheet { max-height: calc(92dvh - 70px); }
+  .host-badge #toast { bottom: calc(150px + env(safe-area-inset-bottom)); }
+}

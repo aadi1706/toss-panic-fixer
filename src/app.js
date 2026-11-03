@@ -631,6 +631,12 @@ document.addEventListener('toggle', (e) => {
   if (e.target.matches('details.ask')) state.askOpen = e.target.open;
 }, true);
 
+// Some hosts inject a fixed badge over the bottom-right corner (Netlify's free plan does). When one is present,
+// the app lifts its own bottom controls above it so the primary buttons stay tappable.
+const syncHostBadge = () => document.documentElement.classList.toggle('host-badge', !!document.getElementById('nl-badge-frame'));
+new MutationObserver(syncHostBadge).observe(document.body, { childList: true });
+syncHostBadge();
+
 render();
 // Exposed for tests and for debugging in the console.
 window.__tpf = { state };
