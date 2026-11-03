@@ -5,7 +5,8 @@ import { readFileSync } from 'node:fs';
 import { pathToFileURL } from 'node:url';
 import { resolve } from 'node:path';
 
-const url = process.argv[2] || pathToFileURL(resolve('dist/index.html')).href;
+const withSample = (u) => (/[?&]match=/.test(u) ? u : u + (u.includes('?') ? '&' : '?') + 'match=sample'); // these scripts test the simulated sample
+const url = withSample(process.argv[2] || pathToFileURL(resolve('dist/index.html')).href);
 const axeSource = readFileSync(resolve('node_modules/axe-core/axe.min.js'), 'utf8');
 let failed = 0;
 const ok = (cond, msg) => { console.log(`${cond ? 'PASS' : 'FAIL'}  ${msg}`); if (!cond) failed++; };

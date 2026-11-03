@@ -5,7 +5,7 @@
 import { chromium } from 'playwright';
 import { pathToFileURL } from 'node:url';
 import { resolve } from 'node:path';
-import { DATASETS, AGGREGATE } from '../src/datasets.js';
+import { DATASETS, AGGREGATE, APP_DEFAULT_ID } from '../src/datasets.js';
 import { fixTeam, findBroken } from '../src/engine.js';
 import { evaluate } from '../src/evaluate.js';
 
@@ -79,7 +79,7 @@ async function run(browser, d, { width, height, phone }, full) {
   await press('[data-act=reset]:visible'); await p.waitForSelector('.trow.pre');
   await p.selectOption('#match-select', 'sample'); await p.waitForTimeout(300);
   ok((await p.locator('.top .sample').innerText()) === 'SAMPLE (simulated)', 'switching to the sample restores the SAMPLE (simulated) label');
-  ok(!(await p.evaluate(() => location.search.includes('match='))), 'the match parameter is removed for the default sample');
+  ok((await p.evaluate(() => location.search)).includes('match=sample'), 'the sample is reachable and reloadable through ?match=sample');
   await p.selectOption('#match-select', d.id); await p.waitForTimeout(300);
   ok((await p.evaluate(() => location.search)).includes(d.id), 'switching to a replay puts it in the URL (deep link)');
 
@@ -101,6 +101,13 @@ async function run(browser, d, { width, height, phone }, full) {
 }
 
 const browser = await chromium.launch();
+{ // the app opens on a real match with no query string, and the disclosure says so
+  const p = await browser.newPage({ viewport: { width: 390, height: 844 } });
+  await p.goto(base); await p.waitForSelector('.trow.pre');
+  ok((await p.locator('.top .sample').innerText()) === 'REAL MATCH (replay)', 'default view opens on a real match');
+  ok((await p.locator('#match-select').inputValue()) === APP_DEFAULT_ID, `default is ${APP_DEFAULT_ID}`);
+  await p.close();
+}
 const [first, ...rest] = replays;
 await run(browser, first, { width: 1280, height: 900, phone: false }, true);
 await run(browser, first, { width: 390, height: 844, phone: true }, true);

@@ -10,7 +10,8 @@ import { teams, ctx, actualPoints } from '../src/data.js';
 import { fixTeam } from '../src/engine.js';
 import { evaluate } from '../src/evaluate.js';
 
-const url = process.argv[2] && !process.argv[2].startsWith('--') ? process.argv[2] : pathToFileURL(resolve('dist/index.html')).href;
+const withSample = (u) => (/[?&]match=/.test(u) ? u : u + (u.includes('?') ? '&' : '?') + 'match=sample'); // these scripts test the simulated sample
+const url = withSample(process.argv[2] && !process.argv[2].startsWith('--') ? process.argv[2] : pathToFileURL(resolve('dist/index.html')).href);
 const withAI = process.argv.includes('--ai');
 const fallback = process.argv.includes('--fallback');
 

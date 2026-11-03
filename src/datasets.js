@@ -32,3 +32,6 @@ export const getDataset = (id) => DATASETS.find((d) => d.id === id) || null;
 
 /** Measured results across many real matches (scripts/evaluate-replay.mjs). */
 export const AGGREGATE = aggregate;
+
+/** The dataset the app opens on: a real match, chosen as the final closest to the measured average (not the flashiest). */
+export const APP_DEFAULT_ID = 'ipl-981019';

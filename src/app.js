@@ -1,7 +1,7 @@
 // Browser UI. Pure engine code does the work; this file only renders and wires events.
 // Layout model: a team ledger (all 8 teams, scannable) + a repair workspace for the selected team
 // + a context rail (toss report, playing XIs, Ask). On phones the workspace is a bottom sheet.
-import { DATASETS, DEFAULT_ID, AGGREGATE, getDataset } from './datasets.js';
+import { DATASETS, DEFAULT_ID, APP_DEFAULT_ID, AGGREGATE, getDataset } from './datasets.js';
 import { fixTeam, teamStats, LIMITS } from './engine.js';
 import { explainTemplate, noFixText } from './explain.js';
 import { evaluate } from './evaluate.js';
@@ -53,7 +53,7 @@ function useDataset(d) {
 const isReplay = () => D.kind === 'replay';
 const slotWord = () => (isReplay() ? 'Usually bats' : 'Bats');
 const matchParam = () => (D.id === DEFAULT_ID ? undefined : D.id);
-useDataset(getDataset(new URLSearchParams(location.search).get('match')) || getDataset(DEFAULT_ID));
+useDataset(getDataset(new URLSearchParams(location.search).get('match')) || getDataset(APP_DEFAULT_ID));
 
 const ordered = () => (state.phase === 'toss'
   ? [...teams].sort((a, b) => Number(state.fixes.get(b.id).broken) - Number(state.fixes.get(a.id).broken))
@@ -569,7 +569,7 @@ function switchDataset(id) {
   useDataset(d);
   resetAll();
   const url = new URL(location.href);
-  if (d.id === DEFAULT_ID) url.searchParams.delete('match'); else url.searchParams.set('match', d.id);
+  if (d.id === APP_DEFAULT_ID) url.searchParams.delete('match'); else url.searchParams.set('match', d.id);
   history.replaceState(null, '', url);
   render();
 }
