@@ -9,7 +9,7 @@ const out = process.argv[2] || 'docs/shots';
 const url = process.argv[3] || pathToFileURL(resolve('dist/index.html')).href;
 mkdirSync(out, { recursive: true });
 const browser = await chromium.launch();
-for (const [name, width, height, phone] of [['desktop', 1280, 900, false], ['phone', 390, 844, true]]) {
+for (const [name, width, height, phone] of [['desktop', 1280, 900, false], ['desktop1440', 1440, 900, false], ['phone', 390, 844, true], ['phone375', 375, 667, true]]) {
   const p = await browser.newPage({ viewport: { width, height }, deviceScaleFactor: 2, hasTouch: phone, isMobile: phone });
   const press = (s) => (phone ? p.tap(s) : p.click(s));
   const shot = (n) => p.screenshot({ path: `${out}/${name}-${n}.png` });

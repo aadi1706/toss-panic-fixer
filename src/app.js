@@ -73,16 +73,17 @@ function rolesList(ids, { captain = null, vc = null, newIds = [], outSet = null 
   }).join('')}</div>`;
 }
 
-/** The fantasy rule bar: players, per-side cap, credits, role limits. */
+/** The fantasy rules as one quiet line: players, per-side cap, credits. Role limits appear only if violated. */
 function rules(ids, { available = null } = {}) {
   const s = teamStats(ids, ctx.pool);
   const avail = available ?? ids.length;
-  const rule = (ok, label, value, title = '') => `<span class="rule ${ok ? 'ok' : 'bad'}"${title ? ` title="${title}"` : ''}><span>${label}</span><b class="num">${value}</b></span>`;
+  const rule = (ok, label, value, title = '') => `<span class="rule ${ok ? 'ok' : 'bad'}"${title ? ` title="${title}"` : ''}><span>${label}</span> <b class="num">${value}</b></span>`;
+  const roleBreaks = ROLES.filter((r) => s.roles[r] < LIMITS.roles[r][0] || s.roles[r] > LIMITS.roles[r][1]);
   return `<div class="rules" role="group" aria-label="Team rules">
     ${rule(avail === LIMITS.total, 'Playing', `${avail}/${LIMITS.total}`)}
     ${Object.entries(s.sides).map(([k, n]) => rule(n <= LIMITS.maxPerSide, k, `${n}/${LIMITS.maxPerSide}`, `At most ${LIMITS.maxPerSide} players from one side`)).join('')}
     ${rule(s.credits <= LIMITS.credits, 'Credits', `${fmt(s.credits)}/${LIMITS.credits}`)}
-    ${ROLES.map((r) => rule(s.roles[r] >= LIMITS.roles[r][0] && s.roles[r] <= LIMITS.roles[r][1], r, s.roles[r], `${LIMITS.roles[r][0]} to ${LIMITS.roles[r][1]} allowed`).replace('class="rule ', 'class="rule role ')).join('')}
+    ${roleBreaks.map((r) => rule(false, r, s.roles[r], `${LIMITS.roles[r][0]} to ${LIMITS.roles[r][1]} allowed`)).join('')}
   </div>`;
 }
 
@@ -102,15 +103,23 @@ function explanation(team, fix, opt) {
   return { text: explainTemplate(team, fix, opt, ctx, state.lang), ai: false };
 }
 
+const arrow = '<svg class="arr" viewBox="0 0 20 12" aria-hidden="true"><path d="M1 6h16m-5-5 5 5-5 5" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>';
+const rc = (role) => `<i class="rl r-${role}">${role}</i>`;
+
+/** One swap = one row: who goes out (muted, struck) and who comes in (prominent). */
 function swapDiff(s) {
   const o = P(s.out), i = P(s.in);
-  return `<li class="diff"><ul class="pair">${prow(s.out, { out: true })}${prow(s.in, { isNew: true, delta: Math.round((i.credits - o.credits) * 10) / 10 })}</ul></li>`;
+  const d = Math.round((i.credits - o.credits) * 10) / 10;
+  const slot = ctx.order.get(s.in);
+  const delta = d === 0 ? '' : `<em class="${d > 0 ? 'up' : 'down'}">${d > 0 ? '+' : '−'}${Math.abs(d)}</em>`;
+  return `<li class="swap"><div class="old"><span class="nm"><span class="sr">Out: </span><s>${esc(o.name)}</s></span><span class="sub">${rc(o.role)}<b>${o.side}</b>${o.credits} cr</span></div>${arrow}
+    <div class="new"><span class="nm"><span class="sr">In: </span>${esc(i.name)}</span><span class="sub">${rc(i.role)}<b>${i.side}</b>${i.credits} cr${delta}</span><span class="sub">Bats ${slot + 1}, form ${i.form}</span></div></li>`;
 }
 
 function leaderDiff(team, opt) {
   const one = (tag, was, now) => (was === now
-    ? `<li class="diff stay"><b class="cv">${tag}</b><span>${esc(P(now).name)} stays</span></li>`
-    : `<li class="diff"><ul class="pair lead"><li class="lrow out"><b class="cv">${tag}</b><span class="nm"><span class="sr">was </span>${esc(P(was).name)}</span></li><li class="lrow new"><b class="cv">${tag}</b><span class="nm">${esc(P(now).name)}</span></li></ul></li>`);
+    ? `<li class="swap stay"><b class="cv">${tag}</b><span>${esc(P(now).name)} stays</span></li>`
+    : `<li class="swap lead"><div class="old"><span class="nm"><b class="cv">${tag}</b><span class="sr">was </span><s>${esc(P(was).name)}</s></span></div>${arrow}<div class="new"><span class="nm"><b class="cv">${tag}</b>${esc(P(now).name)}</span></div></li>`);
   return `${one('C', team.captain, opt.captain)}${one('VC', team.vc, opt.vc)}`;
 }
 
@@ -124,11 +133,8 @@ function decision(team, fix) {
     <div class="options" role="group" aria-label="Fix options for ${esc(team.name)}">
       ${fix.options.map((o, i) => `<button class="opt" aria-pressed="${i === idx}" data-opt="${team.id}:${i}"><span class="o-t">${i === 0 ? 'Best fix' : 'Option ' + (i + 1)}</span><b class="o-g num">+${fmt(o.projGain)}</b><span class="o-m">proj pts</span><span class="o-m">${o.creditsLeft} cr left</span></button>`).join('')}
     </div>
-    <div class="cmp" role="group" aria-label="Before and after this fix">
-      <div><span>Players out</span><b class="num">${fix.out.length}<i>to</i>0</b></div>
-      <div><span>Credits left</span><b class="num">${fmt(beforeCr)}<i>to</i>${fmt(opt.creditsLeft)}</b></div>
-      <div><span>Swaps</span><b class="num">${opt.swaps.length}</b></div>
-    </div>
+    <p class="shift num">Players out <b>${fix.out.length}</b> <span aria-hidden="true">→</span><span class="sr">to</span> <b>0</b>
+      <span class="gap"></span>Credits left <b>${fmt(beforeCr)}</b> <span aria-hidden="true">→</span><span class="sr">to</span> <b>${fmt(opt.creditsLeft)}</b></p>
     <ul class="diffs">${opt.swaps.map(swapDiff).join('')}${leaderDiff(team, opt)}</ul>
     <p class="why"${state.lang === 'hinglish' ? ' lang="hi-Latn"' : ''}><span class="src">${x.ai ? 'AI' : 'Built-in'}</span>${esc(x.text)}</p>
     <div class="apply-row"><span class="a-sum"><b class="num">${opt.swaps.length}</b> ${opt.swaps.length === 1 ? 'swap' : 'swaps'}, <b class="num">${opt.creditsLeft}</b> cr left</span><button class="btn primary" data-apply="${team.id}">Apply fix</button></div>
@@ -287,26 +293,26 @@ function scoreboard() {
 function xiRow(id, i) {
   const p = P(id);
   const n = exposure.get(id) || 0;
-  return `<li class="xr r-${p.role}" style="--i:${i}"><span class="bo">${i + 1}</span><i class="rl">${p.role}</i>
-    <span class="who"><span class="nm">${esc(p.name)}</span><span class="sub${n ? ' has' : ''}">${n ? `In ${n} of ${teams.length} teams` : 'Not in any team'}</span></span><span class="cr num">${p.credits}</span></li>`;
+  return `<li class="xr" style="--i:${i}"><span class="bo">${i + 1}</span><span class="nm">${esc(p.name)}</span>${rc(p.role)}<span class="ex num">${n || '–'}<span class="sr"> of your teams</span></span><span class="cr num">${p.credits}</span></li>`;
 }
 
 function xiPanel() {
   const notes = meta.notes.map((n) => {
     const pl = players.find((p) => n.includes(p.name));
     const ex = pl ? exposure.get(pl.id) || 0 : 0;
-    return `<li><span>${esc(n)}</span>${ex ? `<span class="chip warn">In ${ex} of ${teams.length} teams</span>` : ''}</li>`;
+    return `<li><span>${esc(n)}</span>${ex ? `<small>In ${ex} of your ${teams.length} teams</small>` : ''}</li>`;
   }).join('');
   const side = state.xiSide;
   const benched = meta.squads[side].filter((p) => !ctx.xi.has(p.id));
+  const head = '<div class="xh" aria-hidden="true"><span></span><span>Player</span><span>Role</span><span>Teams</span><span>Cr</span></div>';
   return `<section class="card news" data-panel="xi"><h2>Playing XIs</h2>
     <ul class="notes">${notes}</ul>
     <div class="seg-switch" role="group" aria-label="Choose a side">${Object.entries(sides).map(([k, name]) => `<button data-xi="${k}" aria-pressed="${k === side}">${esc(name)}</button>`).join('')}</div>
-    <ol class="xi">${meta.xiOrder[side].map(xiRow).join('')}</ol>
-    ${benched.length ? `<h3 class="sec-h">Not playing</h3><ul class="plist">${benched.map((p) => {
+    ${head}<ol class="xi">${meta.xiOrder[side].map(xiRow).join('')}</ol>
+    ${benched.length ? `<h3 class="sec-h bench-h">Not playing</h3><ol class="xi">${benched.map((p) => {
     const n = exposure.get(p.id) || 0;
-    return prow(p.id, { out: true, sub: n ? `In ${n} of ${teams.length} teams` : 'Not in any team' });
-  }).join('')}</ul>` : ''}</section>`;
+    return `<li class="xr out"><span class="bo"></span><span class="nm"><span class="sr">Not playing: </span><s>${esc(p.name)}</s></span>${rc(p.role)}<span class="ex num">${n || '–'}<span class="sr"> of your teams</span></span><span class="cr num">${p.credits}</span></li>`;
+  }).join('')}</ol>` : ''}</section>`;
 }
 
 function coinOverlay() {
