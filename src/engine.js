@@ -125,12 +125,6 @@ export function fixTeam(team, ctx, opts) {
   return { teamId: team.id, ...before, options, impossible: before.broken && options.length === 0 };
 }
 
-/** Baseline: the human instinct of grabbing the most expensive eligible replacement. */
-export function naiveFix(team, ctx) {
-  const score = (id) => ctx.pool.get(id).credits * 1000 + project(id, ctx); // credits dominate
-  return enumerateFixes(team, ctx, score, { top: 1 })[0] || null;
-}
-
 /** Hindsight oracle: best repair if you knew each player's actual points. */
 export function oracleFix(team, ctx, actual) {
   const score = (id) => actual[id] ?? 0;

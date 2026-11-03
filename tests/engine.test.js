@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
-import { makeContext, validate, findBroken, fixTeam, naiveFix, oracleFix, project, pointsOf } from '../src/engine.js';
+import { makeContext, validate, findBroken, fixTeam, oracleFix, project, pointsOf } from '../src/engine.js';
 import { computePoints } from '../src/scoring.js';
 
 const meta = JSON.parse(readFileSync(new URL('../data/sample-meta.json', import.meta.url)));
@@ -64,7 +64,6 @@ test('hindsight oracle >= fixer >= doing nothing, on actual points', () => {
     const oracle = pointsOf(best.players, best.captain, best.vc, actual);
     assert.ok(oracle >= fixer - 1e-9, `${t.name}: oracle ${oracle} < fixer ${fixer}`);
     assert.ok(fixer > none, `${t.name}: fixer ${fixer} should beat doing nothing ${none}`);
-    assert.ok(naiveFix(t, ctx));
   }
 });
 
