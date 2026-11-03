@@ -17,11 +17,11 @@ for (const [name, width, height] of [['mobile', 390, 844], ['desktop', 1280, 900
   page.on('console', (m) => m.type() === 'error' && errors.push(m.text()));
   await page.goto(url);
   await page.screenshot({ path: `${dir}/${name}-1-pre.png`, fullPage: true });
-  await page.click('[data-act=toss]');
+  await page.click('[data-act=toss]:visible');
   await page.screenshot({ path: `${dir}/${name}-2-toss.png`, fullPage: true });
-  await page.click('[data-act=fixall]');
+  await page.click('[data-act=fixall]:visible');
   await page.screenshot({ path: `${dir}/${name}-3-fixed.png`, fullPage: true });
-  await page.click('[data-act=play]');
+  await page.click('[data-act=play]:visible');
   await page.screenshot({ path: `${dir}/${name}-4-result.png`, fullPage: true });
   const overflow = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
   console.log(name, 'horizontal overflow px:', overflow, 'errors:', errors);

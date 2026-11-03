@@ -1,6 +1,6 @@
 // Browser UI. Pure engine code does the work; this file only renders and wires events.
-import { ctx, teams, meta, sides, actualPoints } from './data.js';
-import { fixTeam, findBroken } from './engine.js';
+import { ctx, teams, meta, match, sides, actualPoints } from './data.js';
+import { fixTeam, findBroken, teamStats } from './engine.js';
 import { explainTemplate, noFixText } from './explain.js';
 import { evaluate } from './evaluate.js';
 import { explainAll, askFixer } from './ai.js';
@@ -15,100 +15,194 @@ const state = {
   result: null,
   ai: { en: null, hinglish: null, loading: false, error: '' }, // AI explanations per language
   ask: { q: '', loading: false, answer: '', tools: [], error: '' },
+  coin: false, // toss reveal overlay is showing
+  fresh: false, // XIs are animating in
+  xiOpen: true,
 };
 
 const $ = (s, el = document) => el.querySelector(s);
 const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 const fmt = (n) => (Math.round(n * 10) / 10).toLocaleString('en-IN', { minimumFractionDigits: 1, maximumFractionDigits: 1 });
 const P = (id) => ctx.pool.get(id);
+const reduceMotion = () => window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+const ROLES = ['WK', 'BAT', 'AR', 'BOWL'];
+
+/* ---------- players ---------- */
 
 function pill(id, { out = false, cap = null, isNew = false } = {}) {
   const p = P(id);
-  const badge = cap ? `<b class="cv">${cap}</b>` : '';
-  return `<li class="pill r-${p.role}${out ? ' out' : ''}${isNew ? ' new' : ''}" title="${esc(p.name)} · ${p.role} · ${p.credits} cr · ${p.side}">
-    <span class="role">${p.role}</span><span class="nm">${esc(p.name)}</span>${badge}<span class="cr">${p.credits}</span></li>`;
+  const tag = out ? '<u class="tg out">Out</u>' : isNew ? '<u class="tg in">In</u>' : '';
+  return `<li class="pl r-${p.role}${out ? ' out' : ''}${isNew ? ' new' : ''}" title="${esc(p.name)}, ${p.role}, ${p.credits} credits, ${esc(sides[p.side])}">
+    <i class="rl">${p.role}</i><span class="nm">${esc(p.name)}</span><span class="sub"><span class="cr">${p.credits} cr</span>${cap ? `<b class="cv">${cap}</b>` : ''}${tag}</span></li>`;
 }
 
-function pills(team, ids = team.players, { captain = team.captain, vc = team.vc, newIds = [], flagOut = false } = {}) {
+function pills(ids, { captain = null, vc = null, outSet = null, newIds = [] } = {}) {
   const rank = { WK: 0, BAT: 1, AR: 2, BOWL: 3 };
   const sorted = [...ids].sort((a, b) => rank[P(a).role] - rank[P(b).role] || P(b).credits - P(a).credits);
   return `<ul class="pills">${sorted.map((id) => pill(id, {
-    out: flagOut && !ctx.xi.has(id), cap: id === captain ? 'C' : id === vc ? 'VC' : null, isNew: newIds.includes(id),
+    out: !!outSet && outSet.has(id), cap: id === captain ? 'C' : id === vc ? 'VC' : null, isNew: newIds.includes(id),
   })).join('')}</ul>`;
 }
 
-// AI text exists only for each team's best fix; every other option uses the built-in template.
+/** Role split bar + credits + side split for a set of 11 players. */
+function composition(ids, { sidesToo = false } = {}) {
+  const s = teamStats(ids, ctx.pool);
+  const bar = ROLES.filter((r) => s.roles[r]).map((r) => `<i class="seg r-${r}" style="flex:${s.roles[r]}"></i>`).join('');
+  const legend = ROLES.map((r) => `<span class="lg r-${r}"><i></i>${s.roles[r]} ${r}</span>`).join('');
+  const split = Object.entries(s.sides).map(([k, n]) => `${k} ${n}`).join(' / ');
+  return `<div class="comp"><div class="bar-roles" role="img" aria-label="Role split">${bar}</div>
+    <div class="legend">${legend}<span class="cl"><b>${fmt(s.credits)}</b> / 100 cr</span></div>
+    ${sidesToo ? `<div class="facts"><span>Players per side</span><span>${split}</span></div>` : ''}</div>`;
+}
+
+function leaders(team, { captain = team.captain, vc = team.vc, outSet = null } = {}) {
+  const one = (tag, id) => `<span class="ld${outSet && outSet.has(id) ? ' gone' : ''}"><b>${tag}</b>${esc(P(id).name)}</span>`;
+  return `<div class="leaders">${one('C', captain)}${one('VC', vc)}</div>`;
+}
+
+/* ---------- team card ---------- */
+
+function swapRows(opt) {
+  return `<ul class="swaps">${opt.swaps.map((s) => {
+    const o = P(s.out), i = P(s.in);
+    const d = Math.round((i.credits - o.credits) * 10) / 10;
+    return `<li class="swap"><span class="from r-${o.role}"><i class="rl">${o.role}</i><s>${esc(o.name)}</s></span>
+      <svg class="arr" viewBox="0 0 20 12" aria-hidden="true"><path d="M1 6h16m-5-5 5 5-5 5" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      <span class="to r-${i.role}"><i class="rl">${i.role}</i><b>${esc(i.name)}</b></span>
+      <em class="num">${i.credits} cr <span class="${d > 0 ? 'up' : d < 0 ? 'down' : ''}">${d > 0 ? '+' : d < 0 ? '−' : '±'}${Math.abs(d)}</span></em></li>`;
+  }).join('')}</ul>`;
+}
+
+function leaderChange(team, opt) {
+  const bits = [];
+  if (opt.captainChanged) bits.push(`<span><b>C</b><s>${esc(P(team.captain).name)}</s> to <strong>${esc(P(opt.captain).name)}</strong></span>`);
+  if (opt.vcChanged) bits.push(`<span><b>VC</b><s>${esc(P(team.vc).name)}</s> to <strong>${esc(P(opt.vc).name)}</strong></span>`);
+  return bits.length ? `<div class="lchange">${bits.join('')}</div>` : `<div class="lchange keep">Captain and vice-captain stay as they are</div>`;
+}
+
 function explanation(team, fix, opt) {
+  // AI text exists only for each team's best fix; every other option uses the built-in template.
   const ai = state.ai[state.lang]?.[team.id];
   if (ai && opt === fix.options[0]) return { text: ai, ai: true };
   return { text: explainTemplate(team, fix, opt, ctx, state.lang), ai: false };
 }
 
-function swapRows(opt) {
-  return opt.swaps.map((s) => {
-    const o = P(s.out), i = P(s.in);
-    const d = Math.round((i.credits - o.credits) * 10) / 10;
-    return `<li class="swap"><span class="gone r-${o.role}">${esc(o.name)}</span><i aria-hidden="true">→</i>
-      <span class="r-${i.role} came">${esc(i.name)}</span><em>${i.role} · ${i.credits} cr (${d > 0 ? '+' : ''}${d})</em></li>`;
-  }).join('');
-}
-
-function leaderChange(team, opt) {
-  const bits = [];
-  if (opt.captainChanged) bits.push(`C: <s>${esc(P(team.captain).name)}</s> → <b>${esc(P(opt.captain).name)}</b>`);
-  if (opt.vcChanged) bits.push(`VC: <s>${esc(P(team.vc).name)}</s> → <b>${esc(P(opt.vc).name)}</b>`);
-  return bits.length ? `<p class="lead">${bits.join(' · ')}</p>` : `<p class="lead keep">Captain and vice-captain stay the same</p>`;
+function scoreRow(team) {
+  const r = state.result?.rows.find((x) => x.team.id === team.id);
+  if (!r) return '';
+  const gain = r.mine - r.none;
+  return `<div class="score"><div><span>Without fixing</span><b class="num">${fmt(r.none)}</b></div>
+    <div class="mine"><span>With my fixes</span><b class="num">${fmt(r.mine)}</b>${gain > 0 ? `<small class="num">+${fmt(gain)}</small>` : ''}</div>
+    <div><span>Hindsight-best</span><b class="num">${fmt(r.hind)}</b></div></div>`;
 }
 
 function teamCard(team) {
   const fix = state.fixes.get(team.id);
-  const status = state.phase === 'toss' || state.phase === 'played' ? fix : null;
-  if (!status || !fix.broken) {
-    return `<article class="card fine"><header><h3>${esc(team.name)}</h3><span class="tag ok">All 11 playing</span></header>
-      ${pills(team)}<p class="muted">Nothing to fix. This is your control team.</p></article>`;
+  const played = state.phase === 'played';
+  if (!fix.broken) {
+    return `<article class="team fine"><header><h3>${esc(team.name)}</h3><span class="st ok">Fine</span></header>
+      <p class="line">All 11 players are in the playing XI. Nothing to fix.</p>
+      ${scoreRow(team)}${composition(team.players)}${leaders(team)}
+      <details class="more"><summary>View players</summary>${pills(team.players)}</details></article>`;
   }
+  const outSet = new Set(fix.out);
+  const alert = fix.captainOut ? '<span class="st bad soft">Captain out</span>' : fix.vcOut ? '<span class="st warn soft">VC out</span>' : '';
   const applied = state.applied.get(team.id);
-  const cap = fix.captainOut ? '<span class="tag bad">Captain out</span>' : fix.vcOut ? '<span class="tag warn">VC out</span>' : '';
-  const locked = state.phase === 'played';
+  if (applied) {
+    return `<article class="team fixed"><header><h3>${esc(team.name)}</h3><span class="st ok">Fixed</span></header>
+      ${scoreRow(team)}${composition(applied.players)}${leaders(team, { captain: applied.captain, vc: applied.vc })}
+      ${swapRows(applied)}${leaderChange(team, applied)}
+      <details class="more"><summary>View new XI</summary>${pills(applied.players, { captain: applied.captain, vc: applied.vc, newIds: applied.ins })}</details>
+      ${played ? '' : `<button class="ghost" data-undo="${team.id}">Undo fix</button>`}</article>`;
+  }
   if (fix.impossible) {
-    return `<article class="card broken"><header><h3>${esc(team.name)}</h3><span class="tag bad">${fix.out.length} out</span>${cap}</header>
-      ${pills(team, team.players, { flagOut: true })}
-      <p class="nofix"><strong>No valid fix.</strong> ${esc(noFixText(team, fix, ctx, state.lang))}</p></article>`;
+    return `<article class="team broken"><header><h3>${esc(team.name)}</h3><span class="st bad">Broken</span>${alert}</header>
+      <p class="line"><b>${fix.out.length}</b> of 11 players are out</p>
+      ${scoreRow(team)}${composition(team.players)}${leaders(team, { outSet })}${pills(team.players, { captain: team.captain, vc: team.vc, outSet })}
+      <div class="nofix"><b>No valid fix</b><p>${esc(noFixText(team, fix, ctx, state.lang))}</p></div></article>`;
   }
   const idx = state.pick.get(team.id) ?? 0;
   const opt = fix.options[idx];
-  if (applied) {
-    return `<article class="card done"><header><h3>${esc(team.name)}</h3><span class="tag ok">Fixed</span></header>
-      ${pills(team, applied.players, { captain: applied.captain, vc: applied.vc, newIds: applied.ins })}
-      ${leaderChange(team, applied)}
-      ${locked ? '' : `<button class="ghost" data-undo="${team.id}">Undo</button>`}</article>`;
-  }
-  return `<article class="card broken" data-team="${team.id}">
-    <header><h3>${esc(team.name)}</h3><span class="tag bad">${fix.out.length} out</span>${cap}</header>
-    ${pills(team, team.players, { flagOut: true })}
+  const x = explanation(team, fix, opt);
+  return `<article class="team broken" data-team="${team.id}">
+    <header><h3>${esc(team.name)}</h3><span class="st bad">Broken</span>${alert}</header>
+    <p class="line"><b>${fix.out.length}</b> of 11 players are out</p>
+    ${scoreRow(team)}${composition(team.players)}${leaders(team, { outSet })}
+    ${pills(team.players, { captain: team.captain, vc: team.vc, outSet })}
     <div class="opts" role="tablist" aria-label="Fix options for ${esc(team.name)}">
-      ${fix.options.map((o, i) => `<button role="tab" aria-selected="${i === idx}" data-opt="${team.id}:${i}">${i === 0 ? 'Best fix' : 'Option ' + (i + 1)}<small>+${fmt(o.projGain)} proj</small></button>`).join('')}
+      ${fix.options.map((o, i) => `<button role="tab" aria-selected="${i === idx}" data-opt="${team.id}:${i}"><span>${i === 0 ? 'Best fix' : 'Option ' + (i + 1)}</span><small class="num">+${fmt(o.projGain)} proj</small></button>`).join('')}
     </div>
-    <ul class="swaps">${swapRows(opt)}</ul>
-    ${leaderChange(team, opt)}
-    ${(() => { const x = explanation(team, fix, opt); return `<p class="why"><span class="src">${x.ai ? 'AI' : 'Built-in'}</span>${esc(x.text)}</p>`; })()}
-    <footer><span class="cl">${opt.creditsLeft} cr left</span><button class="apply" data-apply="${team.id}">Apply this fix</button></footer>
+    ${swapRows(opt)}${leaderChange(team, opt)}
+    <p class="why"><span class="src">${x.ai ? 'AI' : 'Built-in'}</span>${esc(x.text)}</p>
+    <footer><span class="left"><b class="num">${opt.creditsLeft}</b> cr left</span><button class="apply" data-apply="${team.id}">Apply fix</button></footer>
   </article>`;
 }
 
-function banner() {
+/* ---------- match header, toss, XIs ---------- */
+
+function topbar() {
+  return `<header class="top"><div class="brand">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="10" fill="none" stroke="currentColor" stroke-width="2"/><path d="M6 6.5c3 2.5 3 8.5 0 11M18 6.5c-3 2.5-3 8.5 0 11" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>
+      <h1>Toss Panic Fixer</h1></div>
+    <span class="sample" title="Fictional players and a generated match">SAMPLE (simulated)</span></header>`;
+}
+
+function matchHeader() {
+  const status = state.phase === 'pre' ? 'Pre-toss, XIs not announced' : state.phase === 'toss' ? 'Toss done, XIs confirmed' : 'Match played';
+  return `<section class="match" aria-label="Match">
+    <div class="tm"><i class="crest">BAY</i><b>${esc(sides.BAY)}</b></div>
+    <div class="vs"><span>vs</span></div>
+    <div class="tm r"><b>${esc(sides.DSH)}</b><i class="crest">DSH</i></div>
+    <div class="meta"><span class="stat-dot ${state.phase}"></span>${status}<span class="venue">${esc(match.info.match_type)} at ${esc(match.info.venue)}</span></div>
+  </section>`;
+}
+
+function impact() {
   const fixes = [...state.fixes.values()];
   const aff = fixes.filter((f) => f.broken);
   const outIds = new Set(aff.flatMap((f) => f.out));
   const caps = aff.filter((f) => f.captainOut).length;
   const vcs = aff.filter((f) => f.vcOut).length;
-  const stat = (n, l, cls = '') => `<div class="stat ${cls}"><b>${n}</b><span>${l}</span></div>`;
-  return `<section class="banner" aria-label="Summary">
-    ${stat(`${aff.length}<small>/${teams.length}</small>`, 'teams affected', 'bad')}
-    ${stat(outIds.size, 'players out', 'warn')}
-    ${stat(caps, 'captains out', 'bad')}
-    ${stat(vcs, 'vice-captains out', 'warn')}
+  const fine = fixes.length - aff.length;
+  return `<section class="impact" aria-label="Impact summary">
+    <div class="hero"><b class="num">${aff.length}<small>/${teams.length}</small></b><span>teams broken by the toss<em>${fine} ${fine === 1 ? 'team is' : 'teams are'} fine</em></span></div>
+    <div class="cell"><b class="num warn">${outIds.size}</b><span>players out</span></div>
+    <div class="cell"><b class="num bad">${caps}</b><span>captains out</span></div>
+    <div class="cell"><b class="num warn">${vcs}</b><span>VCs out</span></div>
   </section>`;
+}
+
+function xiRow(id, i) {
+  const p = P(id);
+  return `<li class="xr r-${p.role}" style="--i:${i}"><span class="nm"><em>${i + 1}</em>${esc(p.name)}</span><span class="sub"><i class="rl">${p.role}</i><span class="cr">${p.credits} cr</span></span></li>`;
+}
+
+function tossNews() {
+  const t = meta.toss;
+  const benched = (s) => meta.squads[s].filter((p) => !ctx.xi.has(p.id));
+  const side = (s) => `<div class="xi-side"><h4>${esc(sides[s])}</h4>
+      <ol>${meta.xiOrder[s].map(xiRow).join('')}</ol>
+      ${benched(s).length ? `<p class="bench">Not playing</p><ul class="benchlist">${benched(s).map((p) => `<li class="r-${p.role}"><i class="rl">${p.role}</i><s>${esc(p.name)}</s></li>`).join('')}</ul>` : ''}</div>`;
+  return `<section class="news"><div class="lower"><b>${esc(t.winner)}</b> won the toss and chose to ${esc(t.decision)}</div>
+    <ul class="notes">${meta.notes.map((n) => `<li>${esc(n)}</li>`).join('')}</ul>
+    <details class="xi" ${state.xiOpen ? 'open' : ''}><summary>Confirmed playing XIs</summary><div class="xi-grid">${side('BAY')}${side('DSH')}</div></details></section>`;
+}
+
+function coinOverlay() {
+  const t = meta.toss;
+  return `<div id="coin" class="coin-wrap" role="status"><div class="coin"><i>T</i><i>H</i></div>
+    <p><b>${esc(t.winner)}</b> won the toss<span>and chose to ${esc(t.decision)}</span></p><small>Tap to skip</small></div>`;
+}
+
+/* ---------- AI controls (unchanged behaviour) ---------- */
+
+function langToggle() {
+  const ai = state.ai[state.lang] ? 'AI explanations on' : state.ai.loading ? 'Asking Claude…' : 'Explain with AI';
+  return `<div class="lang-row"><button class="aibtn" data-act="explain" ${state.ai.loading || state.ai[state.lang] ? 'disabled' : ''}>${ai}</button>
+    <div class="lang" role="group" aria-label="Explanation language">
+    <button data-lang="en" aria-pressed="${state.lang === 'en'}">English</button>
+    <button data-lang="hinglish" aria-pressed="${state.lang === 'hinglish'}">Hinglish</button></div></div>
+    ${state.ai.error ? `<p class="aierr" role="status">${esc(state.ai.error)}</p>` : ''}`;
 }
 
 function askBox() {
@@ -122,38 +216,21 @@ function askBox() {
     ${a.error ? `<p class="aierr" role="status">${esc(a.error)}</p>` : ''}</section>`;
 }
 
-function tossNews() {
-  const t = meta.toss;
-  return `<section class="news"><h2>Toss news</h2>
-    <p><b>${esc(t.winner)}</b> won the toss and chose to <b>${esc(t.decision)}</b>.</p>
-    <ul>${meta.notes.map((n) => `<li>${esc(n)}</li>`).join('')}</ul>
-    <details><summary>Announced Playing XIs</summary>
-      ${Object.entries(meta.xiOrder).map(([s, ids]) => `<h4>${esc(sides[s])}</h4><ul class="pills">${ids.map((id) => pill(id)).join('')}</ul>`).join('')}
-    </details></section>`;
-}
+/* ---------- full time ---------- */
 
-function langToggle() {
-  const ai = state.ai[state.lang] ? 'AI explanations on' : state.ai.loading ? 'Asking Claude…' : 'Explain with AI';
-  return `<div class="lang-row"><button class="aibtn" data-act="explain" ${state.ai.loading || state.ai[state.lang] ? 'disabled' : ''}>${ai}</button>
-    <div class="lang" role="group" aria-label="Explanation language">
-    <button data-lang="en" aria-pressed="${state.lang === 'en'}">English</button>
-    <button data-lang="hinglish" aria-pressed="${state.lang === 'hinglish'}">Hinglish</button></div></div>
-    ${state.ai.error ? `<p class="aierr" role="status">${esc(state.ai.error)}</p>` : ''}`;
-}
-
-function resultTable() {
+function fullTime() {
   const e = state.result;
-  const row = (r) => `<tr><th scope="row">${esc(r.team.name)}</th><td>${fmt(r.none)}</td><td>${fmt(r.mine)}</td><td>${fmt(r.hind)}</td></tr>`;
   const pct = e.recovered === null ? 'n/a' : `${e.recovered}%`;
-  return `<section class="result"><h2>Full time</h2>
-    <div class="big"><b>${pct}</b><span>of the gap recovered</span></div>
-    <p class="muted">Gap = hindsight-best minus doing nothing, ${fmt(e.totals.hind - e.totals.none)} pts across your ${teams.length} teams.</p>
-    <div class="tablewrap"><table>
-      <thead><tr><th>Team</th><th>Without fixing</th><th>With my fixes</th><th>Hindsight best</th></tr></thead>
-      <tbody>${e.rows.map(row).join('')}</tbody>
-      <tfoot><tr><th>Total</th><td>${fmt(e.totals.none)}</td><td class="hl">${fmt(e.totals.mine)}</td><td>${fmt(e.totals.hind)}</td></tr></tfoot>
-    </table></div>
-    <p class="honest">One simulated match with fictional players. Recommendations used pre-match form only; actual points appear only in this table. This is not a real-world accuracy figure.</p>
+  const max = Math.max(e.totals.hind, e.totals.mine, e.totals.none, 1);
+  const w = (v) => `${Math.max(2, Math.round((v / max) * 100))}%`;
+  const line = (cls, label, v, extra = '') => `<div class="inn ${cls}"><div class="il"><span>${label}</span><b class="num">${fmt(v)}</b></div><div class="track"><i style="width:${w(v)}"></i></div>${extra}</div>`;
+  return `<section class="fulltime" aria-label="Full time">
+    <div class="ft-head"><h2>Full time</h2><span class="sample sm">SAMPLE (simulated)</span></div>
+    <div class="rec"><b class="num">${pct}</b><span>of the gap recovered<em class="num">${fmt(e.totals.mine - e.totals.none)} of ${fmt(e.totals.hind - e.totals.none)} points</em></span></div>
+    ${line('none', 'Without fixing', e.totals.none)}
+    ${line('mine', 'With my fixes', e.totals.mine, `<p class="rcv num">+${fmt(e.totals.mine - e.totals.none)} recovered</p>`)}
+    ${line('hind', 'Hindsight-best', e.totals.hind)}
+    <p class="honest">One simulated match with fictional players. Recommendations used pre-match form only; actual points appear only here. This is not a real-world accuracy figure.</p>
   </section>`;
 }
 
@@ -167,30 +244,45 @@ function footerBar() {
   return `<button class="cta" data-act="reset">Start over</button>`;
 }
 
+function preCard(t) {
+  return `<article class="team pre"><details><summary><span class="sm-h"><h3>${esc(t.name)}</h3><span class="st neutral">Valid</span></span>
+    ${composition(t.players, { sidesToo: true })}${leaders(t)}<span class="expand">View players</span></summary>${pills(t.players, { captain: t.captain, vc: t.vc })}</details></article>`;
+}
+
 function render() {
   const app = $('#app');
-  const head = `<header class="top"><div class="brand"><span class="coin" aria-hidden="true"></span><h1>Toss Panic Fixer</h1></div>
-    <span class="sample" title="Fictional players and a generated match">SAMPLE (simulated)</span></header>
-    <section class="match"><div class="side bay"><b>${esc(sides.BAY)}</b></div><div class="vs">vs</div><div class="side dsh"><b>${esc(sides.DSH)}</b></div></section>`;
-  let body = '';
+  let side = '';
+  let main = '';
   if (state.phase === 'pre') {
-    body = `<section class="intro"><h2>Your ${teams.length} teams, before the toss</h2>
-      <p>All teams are valid right now. Once the XIs drop, some of these players may not play.</p></section>
-      ${teams.map((t) => `<article class="card"><header><h3>${esc(t.name)}</h3></header>${pills(t)}</article>`).join('')}`;
+    side = `<section class="intro"><h2>Before the toss</h2>
+      <p>Your ${teams.length} teams are all valid right now. When the toss happens, the playing XIs drop and any player who is not in them scores zero.</p></section>`;
+    main = `<div class="list-h"><h2>Your ${teams.length} teams</h2></div>${teams.map(preCard).join('')}`;
   } else if (state.phase === 'toss') {
-    body = `${tossNews()}${banner()}${askBox()}<div class="toolbar"><h2>Your teams</h2>${langToggle()}</div>
+    side = `${impact()}${tossNews()}${askBox()}`;
+    main = `<div class="list-h"><h2>Your teams</h2>${langToggle()}</div>
       ${[...teams].sort((a, b) => Number(state.fixes.get(b.id).broken) - Number(state.fixes.get(a.id).broken)).map(teamCard).join('')}`;
   } else {
-    body = `${resultTable()}<div class="toolbar"><h2>Your teams</h2>${langToggle()}</div>${teams.map(teamCard).join('')}`;
+    side = fullTime();
+    main = `<div class="list-h"><h2>Team by team</h2>${langToggle()}</div>${teams.map(teamCard).join('')}`;
   }
-  app.innerHTML = `${head}<main>${body}</main><nav class="bar" aria-label="Actions">${footerBar()}</nav>`;
+  app.className = state.fresh ? 'fresh' : '';
+  app.innerHTML = `${topbar()}${matchHeader()}<div class="shell"><aside>${side}<nav class="bar" aria-label="Actions">${footerBar()}</nav></aside><main>${main}</main></div>${state.coin ? coinOverlay() : ''}`;
+}
+
+function endCoin() {
+  state.coin = false;
+  $('#coin')?.remove();
 }
 
 function toss() {
   for (const t of teams) state.fixes.set(t.id, fixTeam(t, ctx));
   state.phase = 'toss';
+  state.coin = !reduceMotion();
+  state.fresh = true;
   render();
   window.scrollTo({ top: 0 });
+  if (state.coin) setTimeout(endCoin, 2300);
+  setTimeout(() => { state.fresh = false; $('#app').classList.remove('fresh'); }, 3600);
 }
 
 async function runExplain() {
@@ -243,6 +335,10 @@ document.addEventListener('click', (e) => {
   else if (d.opt) { const [id, i] = d.opt.split(':'); state.pick.set(id, Number(i)); render(); }
   else if (d.lang) { state.lang = d.lang; render(); }
 });
+
+document.addEventListener('click', (e) => { if (e.target.closest('#coin')) endCoin(); });
+// <details> does not bubble 'toggle'; capture it so the open state survives re-renders.
+document.addEventListener('toggle', (e) => { if (e.target.matches('details.xi')) state.xiOpen = e.target.open; }, true);
 
 render();
 // Exposed for tests and for debugging in the console.
