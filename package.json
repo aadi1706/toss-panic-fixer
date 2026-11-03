@@ -8,7 +8,9 @@
   "scripts": {
     "test": "node --test tests/*.test.js",
     "sample": "node scripts/gen-sample.mjs",
-    "build": "node scripts/build.mjs"
+    "build": "node scripts/build.mjs",
+    "e2e": "node scripts/e2e.mjs",
+    "shots": "node scripts/shots.mjs"
   },
   "devDependencies": {
     "esbuild": "^0.28.2",
