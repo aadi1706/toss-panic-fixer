@@ -290,7 +290,7 @@ b.cv { display: inline-grid; place-items: center; min-width: 22px; height: 20px;
   .list-h:has(.lang-row) h2 { display: none; }
   .impact b { font-size: 24px; } .impact .hero b { font-size: 32px; }
   .rband { padding: 12px 16px; }
-  .b-team { gap: 8px; } .b-team b { font-size: 14.5px; white-space: nowrap; } .crest { width: 30px; height: 30px; }
+  .b-team { gap: 8px; } .b-team > span { min-width: 0; } .b-team b { font-size: 14.5px; overflow-wrap: anywhere; } .crest { width: 30px; height: 30px; }
   .sheet-wrap { position: fixed; inset: 0; z-index: 30; display: flex; align-items: flex-end; background: rgba(0, 0, 0, .6); }
   .sheet { position: relative; width: 100%; max-height: 92dvh; display: flex; flex-direction: column; background: var(--s1); border-radius: 16px 16px 0 0; animation: rise .22s ease-out; }
   .grab { width: 36px; height: 4px; border-radius: 2px; background: var(--line2); margin: 8px auto 2px; flex: none; }
@@ -354,3 +354,13 @@ b.cv { display: inline-grid; place-items: center; min-width: 22px; height: 20px;
   .host-badge .sheet { max-height: calc(92dvh - 70px); }
   .host-badge #toast { bottom: calc(150px + env(safe-area-inset-bottom)); }
 }
+
+/* real-match replay: disclosure, match picker */
+.sample.real { color: var(--ink2); border-color: var(--line2); }
+.picker { display: flex; align-items: center; gap: 10px; font-size: 13px; color: var(--muted); }
+.picker select { flex: 1; min-width: 0; height: 36px; padding: 0 30px 0 12px; background: var(--bg) url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6'%3E%3Cpath d='m1 1 4 4 4-4' fill='none' stroke='%238b979b' stroke-width='1.5'/%3E%3C/svg%3E") no-repeat right 12px center; color: var(--ink); border: 1px solid var(--line2); border-radius: var(--r); font: inherit; font-size: 14px; appearance: none; cursor: pointer; text-overflow: ellipsis; }
+.src-note { margin-top: 12px; font-size: 12.5px; color: var(--muted); }
+.src-how { margin-top: 8px; } .src-how ul { display: grid; gap: 6px; padding: 4px 0 8px 16px; list-style: disc; color: var(--muted); font-size: 12.5px; }
+
+.b-main { grid-template-columns: minmax(0, 1fr); }
+.picker select { width: 100%; max-width: 100%; }

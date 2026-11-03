@@ -10,7 +10,8 @@ import { teams, ctx, actualPoints } from '../src/data.js';
 import { fixTeam } from '../src/engine.js';
 import { evaluate } from '../src/evaluate.js';
 
-const url = process.argv[2] && !process.argv[2].startsWith('--') ? process.argv[2] : pathToFileURL(resolve('dist/index.html')).href;
+const withSample = (u) => (/[?&]match=/.test(u) ? u : u + (u.includes('?') ? '&' : '?') + 'match=sample'); // these scripts test the simulated sample
+const url = withSample(process.argv[2] && !process.argv[2].startsWith('--') ? process.argv[2] : pathToFileURL(resolve('dist/index.html')).href);
 const withAI = process.argv.includes('--ai');
 const fallback = process.argv.includes('--fallback');
 
@@ -32,7 +33,9 @@ async function scenario(browser, label, { width, height, phone }) {
   p.on('console', (m) => m.type() === 'error' && !/favicon|fonts\.g/.test(m.text()) && !(fallback && /status of 502/.test(m.text())) && errors.push(m.text()));
   const press = (sel) => (phone ? p.tap(sel) : p.click(sel));
   const count = (sel) => p.locator(sel).filter({ visible: true }).count();
-  const overflow = () => p.evaluate(() => document.documentElement.scrollWidth - innerWidth);
+  // Compare against the device width, not innerWidth: on a phone, overflowing content makes the browser widen
+  // the layout viewport, which would hide the overflow from an innerWidth-based check.
+  const overflow = () => p.evaluate((w) => Math.max(document.documentElement.scrollWidth - w, innerWidth - w), width);
   const toss = async () => { await press('[data-act=toss]:visible'); await p.waitForSelector('#coin', { state: 'detached', timeout: 6000 }); };
   const fresh = async () => { await p.goto(url); await p.waitForSelector('.trow.pre'); };
   const broken = '.trow.broken', fine = '.trow.fine', fixed = '.trow.fixed';

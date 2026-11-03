@@ -14,15 +14,15 @@ async function post(path, body, timeoutMs = 25_000) {
 }
 
 /** -> { [teamId]: "two sentences" } for every team that has a fix. */
-export async function explainAll(lang) {
-  const { explanations } = await post('/api/explain', { lang });
+export async function explainAll(lang, match) {
+  const { explanations } = await post('/api/explain', { lang, match });
   if (!explanations || typeof explanations !== 'object') throw new Error('bad response');
   return explanations;
 }
 
 /** -> { answer, toolCalls: [{ name, input }] } */
-export async function askFixer(question, lang) {
-  const out = await post('/api/ask', { question, lang });
+export async function askFixer(question, lang, match) {
+  const out = await post('/api/ask', { question, lang, match });
   if (typeof out.answer !== 'string') throw new Error('bad response');
   return out;
 }

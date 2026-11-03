@@ -30,6 +30,9 @@ export async function readJson(req, maxBytes = 4096) {
   try { return { body: JSON.parse(text) }; } catch { return { error: 'invalid JSON', status: 400 }; }
 }
 
+/** Match id: undefined means the default sample; anything else must be a short plain id. */
+export const parseMatchId = (v) => (v === undefined ? '' : typeof v === 'string' && /^[a-z0-9-]{1,40}$/.test(v) ? v : null);
+
 export const parseLang = (v) => (v === 'hinglish' ? 'hinglish' : v === 'en' || v === undefined ? 'en' : null);
 
 export function parseQuestion(v) {

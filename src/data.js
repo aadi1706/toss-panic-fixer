@@ -1,18 +1,7 @@
-// Shared sample data and engine context. Used by the browser bundle and the serverless functions.
-import meta from '../data/sample-meta.json' with { type: 'json' };
-import match from '../data/sample-match.json' with { type: 'json' };
-import { makeContext } from './engine.js';
-import { computePoints } from './scoring.js';
+// The simulated sample dataset, exposed as plain constants (used by tests and scripts).
+// The app itself and the server functions pick a dataset through src/datasets.js.
+import { getDataset, DEFAULT_ID } from './datasets.js';
 
-export { meta, match };
-export const sides = meta.sides;
-export const teams = meta.teams;
-export const players = [...meta.squads.BAY, ...meta.squads.DSH];
-export const ctx = makeContext(players, meta.xiOrder);
-
-// Actual fantasy points per player id. Only the post-match evaluation reads this;
-// recommendations never do.
-export function actualPoints() {
-  const byName = computePoints(match);
-  return Object.fromEntries(players.map((p) => [p.id, byName[p.name]?.points ?? 0]));
-}
+const sample = getDataset(DEFAULT_ID);
+export const { meta, match, sides, teams, players, ctx } = sample;
+export const actualPoints = () => sample.actualPoints();
