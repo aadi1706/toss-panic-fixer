@@ -328,6 +328,9 @@ b.cv { display: inline-grid; place-items: center; min-width: 22px; height: 22px;
   .ledger-in { position: sticky; top: 12px; }
   .list-h { margin-top: 0; }
   .bar { position: static; padding: 0; margin-top: 12px; background: none; }
+  /* the primary action stays on screen while the recommendation is being read */
+  .workspace .apply-row { position: sticky; bottom: 0; margin: 14px -20px -20px; padding: 12px 20px; background: var(--s1); border-radius: 0 0 var(--r2) var(--r2); box-shadow: 0 -14px 14px -10px var(--s1); }
+  .rail-ask, .context > .ask { margin-bottom: 12px; }
   .cta { max-width: none; }
   .tn { font-size: 14px; }
 }
@@ -337,3 +340,4 @@ b.cv { display: inline-grid; place-items: center; min-width: 22px; height: 22px;
   .fresh .xr { animation: fade .35s ease both; animation-delay: calc(2.1s + var(--i) * 40ms); }
 }
 @media (prefers-reduced-motion: reduce) { *, *::before, *::after { animation: none !important; transition: none !important; } }
+.ask > summary h2 { white-space: nowrap; }

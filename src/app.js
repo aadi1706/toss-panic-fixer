@@ -19,7 +19,7 @@ const state = {
   ask: { q: '', loading: false, answer: '', tools: [], error: '' },
   coin: false, // toss reveal overlay is showing
   fresh: false, // XIs are animating in
-  askOpen: true,
+  askOpen: window.innerWidth < 900, // desktop: a collapsed row at the top of the rail; phones: the Ask tab
   tab: 'teams', // phone only: teams | xi | ask
   sheet: null, // phone only: team id shown in the bottom sheet
   sel: null, // desktop only: team id shown in the workspace
@@ -194,14 +194,14 @@ function teamRow(team) {
     kind = 'fine'; mode = 'health'; chip = '<span class="chip ok">Fine</span>'; line = '<span class="ok">All 11 playing</span>';
   } else if (applied) {
     kind = 'fixed'; mode = 'fixed'; chip = '<span class="chip ok">Fixed</span>';
-    line = `<span class="ok">${applied.swaps.length} ${applied.swaps.length === 1 ? 'swap' : 'swaps'} applied</span><span class="gain num">+${fmt(applied.projGain)}</span>`;
+    line = `<span class="ok">${applied.swaps.length} ${applied.swaps.length === 1 ? 'swap' : 'swaps'} applied</span><span class="gain num"><span class="sr">projected </span>+${fmt(applied.projGain)}</span>`;
   } else {
     kind = 'broken'; mode = 'health'; chip = '<span class="chip bad">Broken</span>';
     const flag = fix.captainOut ? '<span class="chip bad">C out</span>' : fix.vcOut ? '<span class="chip warn">VC out</span>' : '';
     if (fix.impossible) line = `<span class="bad">${fix.out.length} out</span>${flag}<span class="bad">No valid fix</span>`;
     else {
       const best = fix.options[state.pick.get(team.id) ?? 0];
-      line = `<span class="bad">${fix.out.length} out</span>${flag}<span class="gain num">+${fmt(best.projGain)}</span>`;
+      line = `<span class="bad">${fix.out.length} out</span>${flag}<span class="gain num"><span class="sr">projected </span>+${fmt(best.projGain)}</span>`;
       qa = `<button class="qa" data-apply="${team.id}" aria-label="Apply best fix to ${name}">Fix</button>`;
     }
   }
@@ -368,7 +368,7 @@ function context() {
       <p>Your ${teams.length} teams are all valid right now. When the toss happens, the playing XIs drop and any player who is not in them scores zero.</p>
       <p>Select a team to see its players, credits and captain choices.</p></section></div>`;
   }
-  if (state.phase === 'toss') return `<div class="context" role="region" aria-label="Playing XIs and Ask the Fixer">${xiPanel()}${askBox()}</div>`;
+  if (state.phase === 'toss') return `<div class="context" role="region" aria-label="Ask the Fixer and playing XIs">${askBox()}${xiPanel()}</div>`;
   return `<div class="context" role="region" aria-label="Result summary">${fullTime()}</div>`;
 }
 

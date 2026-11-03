@@ -144,6 +144,7 @@ async function scenario(browser, label, { width, height, phone }) {
     else ok(src === 'Built-in' && (await count('.aierr')) > 0, 'AI down: clear notice and built-in explanations stay');
     await closeSheet();
     if (phone) await press('[data-tab=ask]');
+    else if (!(await p.locator('.ask[open]').count())) await press('.ask summary');
     await press('[data-chip="Which of my teams has no valid fix?"]:visible');
     await press('.ask form .btn:visible');
     await p.waitForFunction(() => !/Checking/.test(document.querySelector('.ask form .btn').textContent), null, { timeout: 60000 });
