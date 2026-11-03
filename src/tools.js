@@ -5,7 +5,7 @@ import { validate, findBroken, fixTeam, project, LIMITS } from './engine.js';
 const r1 = (n) => Math.round(n * 10) / 10;
 const norm = (s) => String(s ?? '').trim().toLowerCase();
 
-export function makeTools({ ctx, teams, sides }) {
+export function makeTools({ ctx, teams, sides, note }) {
   const findTeam = (q) => teams.find((t) => norm(t.id) === norm(q) || norm(t.name) === norm(q))
     || teams.find((t) => norm(t.name).includes(norm(q)) && norm(q).length >= 3);
   const findPlayer = (q) => [...ctx.pool.values()].find((p) => norm(p.name) === norm(q) || p.id === norm(q))
@@ -43,7 +43,7 @@ export function makeTools({ ctx, teams, sides }) {
     },
 
     list_playing_xi() {
-      const out = {};
+      const out = note ? { note } : {};
       for (const [side, name] of Object.entries(sides)) {
         out[name] = [...ctx.order.entries()]
           .map(([id, i]) => ({ id, i, p: ctx.pool.get(id) })).filter((x) => x.p.side === side).sort((a, b) => a.i - b.i)

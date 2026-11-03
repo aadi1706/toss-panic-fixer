@@ -1,13 +1,14 @@
 // Browser UI. Pure engine code does the work; this file only renders and wires events.
 // Layout model: a team ledger (all 8 teams, scannable) + a repair workspace for the selected team
 // + a context rail (toss report, playing XIs, Ask). On phones the workspace is a bottom sheet.
-import { ctx, teams, meta, match, sides, players, actualPoints } from './data.js';
+import { DATASETS, DEFAULT_ID, getDataset } from './datasets.js';
 import { fixTeam, teamStats, LIMITS } from './engine.js';
 import { explainTemplate, noFixText } from './explain.js';
 import { evaluate } from './evaluate.js';
 import { explainAll, askFixer } from './ai.js';
 
-const actual = actualPoints();
+// The active dataset. `ctx, teams, meta, match, sides, players` always point at it; useDataset() swaps them.
+let D, ctx, teams, meta, match, sides, players, actual;
 const state = {
   phase: 'pre', // pre -> toss -> played
   lang: 'en',
@@ -23,7 +24,7 @@ const state = {
   tab: 'teams', // phone only: teams | xi | ask
   sheet: null, // phone only: team id shown in the bottom sheet
   sel: null, // desktop only: team id shown in the workspace
-  xiSide: 'BAY', // which playing XI the rail shows
+  xiSide: '', // which playing XI the rail shows (first side of the active dataset)
   flash: new Set(), // team ids that were just fixed (row highlight)
   animateSel: false,
   toast: '',
@@ -41,7 +42,18 @@ const RANK = { WK: 0, BAT: 1, AR: 2, BOWL: 3 };
 
 // How many of the fan's teams each player appears in (derived from the real teams; used for exposure).
 const exposure = new Map();
-for (const t of teams) for (const id of t.players) exposure.set(id, (exposure.get(id) || 0) + 1);
+
+function useDataset(d) {
+  D = d; ({ ctx, teams, meta, match, sides, players } = d);
+  actual = d.actualPoints();
+  exposure.clear();
+  for (const t of teams) for (const id of t.players) exposure.set(id, (exposure.get(id) || 0) + 1);
+  state.xiSide = Object.keys(sides)[0];
+}
+const isReplay = () => D.kind === 'replay';
+const slotWord = () => (isReplay() ? 'Usually bats' : 'Bats');
+const matchParam = () => (D.id === DEFAULT_ID ? undefined : D.id);
+useDataset(getDataset(new URLSearchParams(location.search).get('match')) || getDataset(DEFAULT_ID));
 
 const ordered = () => (state.phase === 'toss'
   ? [...teams].sort((a, b) => Number(state.fixes.get(b.id).broken) - Number(state.fixes.get(a.id).broken))
@@ -54,7 +66,7 @@ function prow(id, { out = false, isNew = false, cap = null, sub = null, delta = 
   const p = P(id);
   const slot = ctx.order.get(id);
   // Batting slots only exist once the XIs are announced; before the toss they would leak who is playing.
-  const line = sub ?? (out ? 'Not in XI' : state.phase !== 'pre' && slot !== undefined ? `Bats ${slot + 1}, form ${p.form}` : `Form ${p.form}`);
+  const line = sub ?? (out ? 'Not in XI' : state.phase !== 'pre' && slot !== undefined ? `${slotWord()} ${slot + 1}, form ${p.form}` : `Form ${p.form}`);
   const d = delta === null ? '' : `<em class="${delta > 0 ? 'up' : delta < 0 ? 'down' : ''}">${delta > 0 ? '+' : delta < 0 ? '−' : '±'}${Math.abs(delta)}</em>`;
   return `<li class="prow r-${p.role}${out ? ' out' : ''}${isNew ? ' new' : ''}">
     <i class="rl">${p.role}</i>
@@ -113,7 +125,7 @@ function swapDiff(s) {
   const slot = ctx.order.get(s.in);
   const delta = d === 0 ? '' : `<em class="${d > 0 ? 'up' : 'down'}">${d > 0 ? '+' : '−'}${Math.abs(d)}</em>`;
   return `<li class="swap"><div class="old"><span class="nm"><span class="sr">Out: </span><s>${esc(o.name)}</s></span><span class="sub">${rc(o.role)}<b>${o.side}</b>${o.credits} cr</span></div>${arrow}
-    <div class="new"><span class="nm"><span class="sr">In: </span>${esc(i.name)}</span><span class="sub">${rc(i.role)}<b>${i.side}</b>${i.credits} cr${delta}</span><span class="sub">Bats ${slot + 1}, form ${i.form}</span></div></li>`;
+    <div class="new"><span class="nm"><span class="sr">In: </span>${esc(i.name)}</span><span class="sub">${rc(i.role)}<b>${i.side}</b>${i.credits} cr${delta}</span><span class="sub">${slotWord()} ${slot + 1}, form ${i.form}</span></div></li>`;
 }
 
 function leaderDiff(team, opt) {
@@ -239,11 +251,19 @@ function resultRow(team) {
 
 /* ---------- scoreboard, impact, rail ---------- */
 
+/** The always-visible data disclosure: simulated sample vs real replay. */
+function disclosure(small = false) {
+  const cls = `sample${small ? ' sm' : ''}${isReplay() ? ' real' : ''}`;
+  return isReplay()
+    ? `<span class="${cls}" title="A replay of a real match. Squads, roles, credits and fan teams are inferred or generated.">REAL MATCH (replay)</span>`
+    : `<span class="${cls}" title="Fictional players and a generated match">SAMPLE (simulated)</span>`;
+}
+
 function topbar() {
   return `<header class="top"><div class="brand">
       <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="10" fill="none" stroke="currentColor" stroke-width="2"/><path d="M6 6.5c3 2.5 3 8.5 0 11M18 6.5c-3 2.5-3 8.5 0 11" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>
       <h1>Toss Panic Fixer</h1></div>
-    <span class="sample" title="Fictional players and a generated match">SAMPLE (simulated)</span></header>`;
+    ${disclosure()}</header>`;
 }
 
 function impact() {
@@ -268,6 +288,13 @@ function resultBand() {
   return `<div class="rband" role="group" aria-label="Result"><b class="num">${pct}</b><span>of the gap recovered<em class="num">${fmt(e.totals.mine - e.totals.none)} of ${fmt(e.totals.hind - e.totals.none)} points</em></span></div>`;
 }
 
+function matchPicker() {
+  const opt = (d) => `<option value="${d.id}"${d.id === D.id ? ' selected' : ''}>${esc(d.kind === 'replay' ? d.meta.source.label : d.label)}</option>`;
+  return `<div class="picker"><label for="match-select">Match</label><select id="match-select" data-pick="match">
+    <optgroup label="Simulated">${DATASETS.filter((d) => d.kind === 'sample').map(opt).join('')}</optgroup>
+    <optgroup label="Real matches (replay)">${DATASETS.filter((d) => d.kind === 'replay').map(opt).join('')}</optgroup></select></div>`;
+}
+
 function scoreboard() {
   const toss = state.phase !== 'pre';
   const t = meta.toss;
@@ -278,12 +305,13 @@ function scoreboard() {
     ? '<p class="b-line muted">Playing XIs are announced at the toss</p>'
     : state.phase === 'toss'
       ? `<p class="b-line"><b>${esc(t.winner)}</b> won the toss and chose to ${esc(t.decision)}</p>`
-      : `<p class="b-line"><b>${esc(o.winner)}</b> won${by ? ` by ${by[1]} ${esc(by[0])}` : ''}<span class="muted"> (simulated)</span></p>`;
+      : `<p class="b-line"><b>${esc(o.winner)}</b> won${by ? ` by ${by[1]} ${esc(by[0])}` : ''}${isReplay() ? '' : '<span class="muted"> (simulated)</span>'}</p>`;
   const team = (k, right) => `<div class="b-team${right ? ' r' : ''}"><i class="crest">${k}</i><span><b>${esc(sides[k])}</b>${toss ? `<small>${meta.xiOrder[k].length} confirmed</small>` : '<small>XI to be announced</small>'}</span></div>`;
   return `<section class="board" aria-label="Match">
     <div class="b-main">
-      <div class="b-top"><span class="b-status ${state.phase}"><i></i>${status}</span><span class="b-meta">${esc(match.info.match_type)} at ${esc(match.info.venue)}</span></div>
-      <div class="b-teams">${team('BAY', false)}<span class="b-vs">vs</span>${team('DSH', true)}</div>
+      <div class="b-top"><span class="b-status ${state.phase}"><i></i>${status}</span><span class="b-meta">${esc(match.info.match_type)} at ${esc(match.info.venue)}${isReplay() ? `, ${new Date(match.info.dates[0]).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })}` : ''}</span></div>
+      ${state.phase === 'pre' ? matchPicker() : ''}
+      <div class="b-teams">${team(Object.keys(sides)[0], false)}<span class="b-vs">vs</span>${team(Object.keys(sides)[1], true)}</div>
       ${line}
     </div>
     ${state.phase === 'toss' ? impact() : state.phase === 'played' ? resultBand() : ''}
@@ -332,9 +360,16 @@ function langToggle() {
     ${state.ai.error ? `<p class="aierr" role="status">${esc(state.ai.error)}</p>` : ''}`;
 }
 
+function askChips() {
+  if (!isReplay()) return ['Who should captain Powerplay Pandits?', 'Can I swap Mohit Saxena for Siddharth Rao in t1?', 'Which of my teams has no valid fix?'];
+  const t1 = teams[0];
+  const sw = state.fixes.get(t1.id)?.options?.[0]?.swaps?.[0];
+  return [`Who should captain ${t1.name}?`, ...(sw ? [`Can I swap ${P(sw.out).name} for ${P(sw.in).name} in ${t1.id}?`] : []), 'Which of my teams has no valid fix?'];
+}
+
 function askBox() {
   const a = state.ask;
-  const chips = ['Who should captain Powerplay Pandits?', 'Can I swap Mohit Saxena for Siddharth Rao in t1?', 'Which of my teams has no valid fix?'];
+  const chips = askChips();
   const open = state.askOpen || a.q || a.answer || a.error || a.loading;
   return `<details class="ask card" data-panel="ask" ${open ? 'open' : ''}><summary><h2>Ask the Fixer</h2><span>Check any swap against the real rules</span></summary>
     <form data-ask><input name="q" maxlength="300" placeholder="e.g. Is swapping Tejas Naik for Harsh Menon valid in t1?" value="${esc(a.q)}" aria-label="Your question" autocomplete="off">
@@ -350,11 +385,13 @@ function fullTime() {
   const w = (v) => `${Math.max(2, Math.round((v / max) * 100))}%`;
   const line = (cls, label, v, extra = '') => `<div class="inn ${cls}"><div class="il"><span>${label}</span><b class="num">${fmt(v)}</b></div><div class="track"><i style="width:${w(v)}"></i></div>${extra}</div>`;
   return `<section class="card fulltime" data-panel="teams" aria-label="Full time">
-    <div class="ft-head"><h2>Full time</h2><span class="sample sm">SAMPLE (simulated)</span></div>
+    <div class="ft-head"><h2>Full time</h2>${disclosure(true)}</div>
     ${line('none', 'Without fixing', e.totals.none)}
     ${line('mine', 'With my fixes', e.totals.mine, `<p class="rcv num">+${fmt(e.totals.mine - e.totals.none)} recovered</p>`)}
     ${line('hind', 'Hindsight-best', e.totals.hind)}
-    <p class="honest">One simulated match with fictional players. Recommendations used pre-match form only; actual points appear only here. This is not a real-world accuracy figure.</p>
+    <p class="honest">${isReplay()
+    ? 'A replay of one real match. The match, toss, playing XIs and points are real; squads, roles, credits and the 8 fan teams are inferred or generated. Recommendations used pre-match form only; actual points appear only here. One match is not an accuracy figure.'
+    : 'One simulated match with fictional players. Recommendations used pre-match form only; actual points appear only here. This is not a real-world accuracy figure.'}</p>
   </section>`;
 }
 
@@ -368,11 +405,17 @@ function footerBar() {
   return `<button class="cta" data-act="reset">Start over</button>`;
 }
 
+function replayNote() {
+  const src = meta.source;
+  return `<p class="src-note">This replays a real match. ${esc(src.attribution)}</p>
+    <details class="more src-how"><summary>How this replay was built</summary><ul>${src.assumptions.map((a) => `<li>${esc(a)}</li>`).join('')}<li>Form, roles, benches and credits use only matches played before this one. This match's own points appear only after "Play the match".</li></ul></details>`;
+}
+
 function context() {
   if (state.phase === 'pre') {
     return `<div class="context" role="region" aria-label="Before the toss"><section class="card intro"><h2>Before the toss</h2>
       <p>Your ${teams.length} teams are all valid right now. When the toss happens, the playing XIs drop and any player who is not in them scores zero.</p>
-      <p>Select a team to see its players, credits and captain choices.</p></section></div>`;
+      <p>Select a team to see its players, credits and captain choices.</p>${isReplay() ? replayNote() : ''}</section></div>`;
   }
   if (state.phase === 'toss') return `<div class="context" role="region" aria-label="Ask the Fixer and playing XIs">${askBox()}${xiPanel()}</div>`;
   return `<div class="context" role="region" aria-label="Result summary">${fullTime()}</div>`;
@@ -506,10 +549,28 @@ function toss() {
 
 /* ---------- actions ---------- */
 
+function resetAll() {
+  state.phase = 'pre'; state.fixes.clear(); state.pick.clear(); state.applied.clear(); state.result = null;
+  state.ai = { en: null, hinglish: null, loading: false, error: '' };
+  state.ask = { q: '', loading: false, answer: '', tools: [], error: '' };
+  state.tab = 'teams'; state.sheet = null; state.sel = null; state.xiSide = Object.keys(sides)[0]; state.flash = new Set();
+}
+
+function switchDataset(id) {
+  const d = getDataset(id);
+  if (!d || d === D) return;
+  useDataset(d);
+  resetAll();
+  const url = new URL(location.href);
+  if (d.id === DEFAULT_ID) url.searchParams.delete('match'); else url.searchParams.set('match', d.id);
+  history.replaceState(null, '', url);
+  render();
+}
+
 async function runExplain() {
   const lang = state.lang;
   state.ai.loading = true; state.ai.error = ''; render();
-  try { state.ai[lang] = await explainAll(lang); }
+  try { state.ai[lang] = await explainAll(lang, matchParam()); }
   catch { state.ai.error = 'AI is unavailable right now, so you are seeing the built-in explanations. The fixes themselves are unaffected.'; }
   state.ai.loading = false; render();
 }
@@ -517,7 +578,7 @@ async function runExplain() {
 async function runAsk(q) {
   state.ask = { q, loading: true, answer: '', tools: [], error: '' }; render();
   try {
-    const out = await askFixer(q, state.lang);
+    const out = await askFixer(q, state.lang, matchParam());
     state.ask = { q, loading: false, answer: out.answer, tools: [...new Set(out.toolCalls.map((t) => t.name))], error: '' };
   } catch (err) {
     state.ask = { q, loading: false, answer: '', tools: [], error: `${err.message}. Everything else still works.` };
@@ -574,6 +635,7 @@ document.addEventListener('submit', (e) => {
   if (q.length >= 3 && !state.ask.loading) runAsk(q);
 });
 document.addEventListener('input', (e) => { if (e.target.name === 'q') state.ask.q = e.target.value; });
+document.addEventListener('change', (e) => { if (e.target.id === 'match-select') switchDataset(e.target.value); });
 
 document.addEventListener('click', (e) => {
   if (e.target.closest?.('.skip')) { e.preventDefault(); $('#teams-main')?.focus(); return; }
@@ -596,10 +658,7 @@ document.addEventListener('click', (e) => {
     render();
     window.scrollTo({ top: 0 });
   } else if (d.act === 'reset') {
-    state.phase = 'pre'; state.fixes.clear(); state.pick.clear(); state.applied.clear(); state.result = null;
-    state.ai = { en: null, hinglish: null, loading: false, error: '' };
-    state.ask = { q: '', loading: false, answer: '', tools: [], error: '' };
-    state.tab = 'teams'; state.sheet = null; state.sel = null; state.xiSide = 'BAY'; state.flash = new Set();
+    resetAll();
     render(); window.scrollTo({ top: 0 });
   } else if (d.apply) applyFix(d.apply);
   else if (d.undo) { state.applied.delete(d.undo); render(); }
@@ -639,4 +698,4 @@ syncHostBadge();
 
 render();
 // Exposed for tests and for debugging in the console.
-window.__tpf = { state };
+window.__tpf = { state, get dataset() { return D; } };
