@@ -119,8 +119,22 @@ td.hl { color: var(--lime); }
 @media (min-width: 900px) {
   #app { max-width: 1120px; }
   main { display: grid; grid-template-columns: 1fr 1fr; gap: 0 16px; align-items: start; }
-  main > .news, main > .banner, main > .toolbar, main > .result, main > .intro { grid-column: 1 / -1; }
+  main > .news, main > .banner, main > .ask, main > .toolbar, main > .result, main > .intro { grid-column: 1 / -1; }
   .banner { grid-template-columns: repeat(4, 1fr); }
   .bar { left: 50%; right: auto; transform: translateX(-50%); width: 760px; max-width: 100%; }
 }
 @media (prefers-reduced-motion: no-preference) { .card, .stat { transition: border-color .2s; } }
+
+.lang-row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; justify-content: flex-end; }
+.aibtn { background: #1b2a13; color: var(--lime); border: 1px solid var(--lime); border-radius: 999px; padding: 9px 14px; font-weight: 800; font-size: 13px; min-height: 40px; cursor: pointer; }
+.aibtn:disabled { opacity: .6; cursor: default; }
+.aierr { flex-basis: 100%; margin: 6px 0 0; font-size: 12.5px; color: var(--amber); }
+.why .src { display: inline-block; font: 800 9px/1 var(--mono); letter-spacing: .08em; text-transform: uppercase; padding: 3px 5px; border-radius: 4px; margin-right: 8px; vertical-align: 1px; background: #2a3a33; color: var(--muted); }
+.ask { background: var(--panel); border: 1px solid var(--line); border-radius: 14px; padding: 12px; margin-bottom: 18px; }
+.ask form { display: flex; gap: 8px; margin-top: 10px; }
+.ask input { flex: 1; min-width: 0; background: #0f1815; color: var(--ink); border: 1px solid var(--line); border-radius: 10px; padding: 0 12px; min-height: 44px; font: inherit; font-size: 16px; }
+.ask input:focus { outline: 2px solid var(--lime); outline-offset: 1px; }
+.chips { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 8px; }
+.chips button { background: transparent; border: 1px solid var(--line); color: var(--muted); border-radius: 999px; padding: 7px 10px; font-size: 12px; cursor: pointer; text-align: left; }
+.answer { margin-top: 12px; padding: 10px; background: #0f1815; border-left: 3px solid var(--lime); border-radius: 0 8px 8px 0; }
+.answer p { margin: 0 0 6px; } .answer small { color: var(--muted); font-size: 11.5px; } .answer code { font: 700 11px var(--mono); color: var(--lime); }

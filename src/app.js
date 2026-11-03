@@ -3,6 +3,7 @@ import { ctx, teams, meta, sides, actualPoints } from './data.js';
 import { fixTeam, findBroken } from './engine.js';
 import { explainTemplate, noFixText } from './explain.js';
 import { evaluate } from './evaluate.js';
+import { explainAll, askFixer } from './ai.js';
 
 const actual = actualPoints();
 const state = {
@@ -12,6 +13,8 @@ const state = {
   pick: new Map(), // teamId -> index of the option being viewed
   applied: new Map(), // teamId -> option the fan applied
   result: null,
+  ai: { en: null, hinglish: null, loading: false, error: '' }, // AI explanations per language
+  ask: { q: '', loading: false, answer: '', tools: [], error: '' },
 };
 
 const $ = (s, el = document) => el.querySelector(s);
@@ -34,8 +37,11 @@ function pills(team, ids = team.players, { captain = team.captain, vc = team.vc,
   })).join('')}</ul>`;
 }
 
+// AI text exists only for each team's best fix; every other option uses the built-in template.
 function explanation(team, fix, opt) {
-  return explainTemplate(team, fix, opt, ctx, state.lang);
+  const ai = state.ai[state.lang]?.[team.id];
+  if (ai && opt === fix.options[0]) return { text: ai, ai: true };
+  return { text: explainTemplate(team, fix, opt, ctx, state.lang), ai: false };
 }
 
 function swapRows(opt) {
@@ -85,7 +91,7 @@ function teamCard(team) {
     </div>
     <ul class="swaps">${swapRows(opt)}</ul>
     ${leaderChange(team, opt)}
-    <p class="why">${esc(explanation(team, fix, opt))}</p>
+    ${(() => { const x = explanation(team, fix, opt); return `<p class="why"><span class="src">${x.ai ? 'AI' : 'Built-in'}</span>${esc(x.text)}</p>`; })()}
     <footer><span class="cl">${opt.creditsLeft} cr left</span><button class="apply" data-apply="${team.id}">Apply this fix</button></footer>
   </article>`;
 }
@@ -105,6 +111,17 @@ function banner() {
   </section>`;
 }
 
+function askBox() {
+  const a = state.ask;
+  const chips = ['Who should captain Powerplay Pandits?', 'Can I swap Mohit Saxena for Siddharth Rao in t1?', 'Which of my teams has no valid fix?'];
+  return `<section class="ask"><h2>Ask the Fixer</h2>
+    <form data-ask><input name="q" maxlength="300" placeholder="e.g. Is swapping Tejas Naik for Harsh Menon valid in t1?" value="${esc(a.q)}" aria-label="Your question" autocomplete="off">
+      <button class="apply" ${a.loading ? 'disabled' : ''}>${a.loading ? 'Checking…' : 'Ask'}</button></form>
+    <div class="chips">${chips.map((c) => `<button type="button" data-chip="${esc(c)}">${esc(c)}</button>`).join('')}</div>
+    ${a.answer ? `<div class="answer"><p>${esc(a.answer)}</p><small>Checked with the real engine: ${a.tools.length ? a.tools.map((t) => `<code>${esc(t)}</code>`).join(' ') : 'no tools used'}. Projections use pre-match form only.</small></div>` : ''}
+    ${a.error ? `<p class="aierr" role="status">${esc(a.error)}</p>` : ''}</section>`;
+}
+
 function tossNews() {
   const t = meta.toss;
   return `<section class="news"><h2>Toss news</h2>
@@ -116,9 +133,12 @@ function tossNews() {
 }
 
 function langToggle() {
-  return `<div class="lang" role="group" aria-label="Explanation language">
+  const ai = state.ai[state.lang] ? 'AI explanations on' : state.ai.loading ? 'Asking Claude…' : 'Explain with AI';
+  return `<div class="lang-row"><button class="aibtn" data-act="explain" ${state.ai.loading || state.ai[state.lang] ? 'disabled' : ''}>${ai}</button>
+    <div class="lang" role="group" aria-label="Explanation language">
     <button data-lang="en" aria-pressed="${state.lang === 'en'}">English</button>
-    <button data-lang="hinglish" aria-pressed="${state.lang === 'hinglish'}">Hinglish</button></div>`;
+    <button data-lang="hinglish" aria-pressed="${state.lang === 'hinglish'}">Hinglish</button></div></div>
+    ${state.ai.error ? `<p class="aierr" role="status">${esc(state.ai.error)}</p>` : ''}`;
 }
 
 function resultTable() {
@@ -158,7 +178,7 @@ function render() {
       <p>All teams are valid right now. Once the XIs drop, some of these players may not play.</p></section>
       ${teams.map((t) => `<article class="card"><header><h3>${esc(t.name)}</h3></header>${pills(t)}</article>`).join('')}`;
   } else if (state.phase === 'toss') {
-    body = `${tossNews()}${banner()}<div class="toolbar"><h2>Your teams</h2>${langToggle()}</div>
+    body = `${tossNews()}${banner()}${askBox()}<div class="toolbar"><h2>Your teams</h2>${langToggle()}</div>
       ${[...teams].sort((a, b) => Number(state.fixes.get(b.id).broken) - Number(state.fixes.get(a.id).broken)).map(teamCard).join('')}`;
   } else {
     body = `${resultTable()}<div class="toolbar"><h2>Your teams</h2>${langToggle()}</div>${teams.map(teamCard).join('')}`;
@@ -173,11 +193,40 @@ function toss() {
   window.scrollTo({ top: 0 });
 }
 
+async function runExplain() {
+  const lang = state.lang;
+  state.ai.loading = true; state.ai.error = ''; render();
+  try { state.ai[lang] = await explainAll(lang); }
+  catch { state.ai.error = 'AI is unavailable right now, so you are seeing the built-in explanations. The fixes themselves are unaffected.'; }
+  state.ai.loading = false; render();
+}
+
+async function runAsk(q) {
+  state.ask = { q, loading: true, answer: '', tools: [], error: '' }; render();
+  try {
+    const out = await askFixer(q, state.lang);
+    state.ask = { q, loading: false, answer: out.answer, tools: [...new Set(out.toolCalls.map((t) => t.name))], error: '' };
+  } catch (err) {
+    state.ask = { q, loading: false, answer: '', tools: [], error: `${err.message}. Everything else still works.` };
+  }
+  render();
+}
+
+document.addEventListener('submit', (e) => {
+  if (!e.target.matches('[data-ask]')) return;
+  e.preventDefault();
+  const q = new FormData(e.target).get('q').trim();
+  if (q.length >= 3 && !state.ask.loading) runAsk(q);
+});
+document.addEventListener('input', (e) => { if (e.target.name === 'q') state.ask.q = e.target.value; });
+
 document.addEventListener('click', (e) => {
   const b = e.target.closest('button');
   if (!b) return;
   const d = b.dataset;
-  if (d.act === 'toss') toss();
+  if (d.chip) { state.ask.q = d.chip; render(); return; }
+  if (d.act === 'explain') runExplain();
+  else if (d.act === 'toss') toss();
   else if (d.act === 'fixall') {
     for (const [id, f] of state.fixes) if (f.options.length && !state.applied.has(id)) state.applied.set(id, f.options[state.pick.get(id) ?? 0]);
     render();
@@ -187,7 +236,7 @@ document.addEventListener('click', (e) => {
     render();
     window.scrollTo({ top: 0 });
   } else if (d.act === 'reset') {
-    state.phase = 'pre'; state.fixes.clear(); state.pick.clear(); state.applied.clear(); state.result = null;
+    state.phase = 'pre'; state.fixes.clear(); state.pick.clear(); state.applied.clear(); state.result = null; state.ai = { en: null, hinglish: null, loading: false, error: '' }; state.ask = { q: '', loading: false, answer: '', tools: [], error: '' };
     render(); window.scrollTo({ top: 0 });
   } else if (d.apply) { state.applied.set(d.apply, state.fixes.get(d.apply).options[state.pick.get(d.apply) ?? 0]); render(); }
   else if (d.undo) { state.applied.delete(d.undo); render(); }
