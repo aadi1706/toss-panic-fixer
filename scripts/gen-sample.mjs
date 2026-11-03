@@ -2,6 +2,7 @@
 // plus squads and a set of fan teams. Deterministic: same seed -> same output.
 // Usage: node scripts/gen-sample.mjs [seed]
 import { writeFileSync, mkdirSync } from 'node:fs';
+import { validate } from '../src/engine.js';
 
 export function mulberry32(a) {
   return function () {
@@ -121,6 +122,48 @@ function simulateInnings(rng, batTeam, bowlTeam, batXI, bowlXI, quota, target) {
   return { overs, runs, wk, chased: false };
 }
 
+
+const TEAM_PLANS = [
+  { name: 'Powerplay Pandits', force: ['Rohan Malhotra', 'Tejas Naik'], c: 'Rohan Malhotra', vc: 'Tejas Naik' },
+  { name: 'Super Over Squad', force: ['Rohan Malhotra', 'Tejas Naik'], c: 'Tejas Naik', vc: 'Ayaan Farooqui' },
+  { name: 'Yorker Yodhas', force: ['Rohan Malhotra'], c: 'Rohan Malhotra', vc: 'Shaurya Bedi' },
+  { name: 'Chai Break XI', force: ['Tejas Naik', 'Dev Chauhan'], c: 'Ayaan Farooqui', vc: 'Tejas Naik' },
+  { name: 'Dugout Legends', force: ['Rohan Malhotra'], c: 'Aaryan Bhatt', vc: 'Rohan Malhotra' },
+  { name: 'Mid-Off Mavericks', force: ['Dev Chauhan'], c: 'Siddharth Rao', vc: 'Harsh Menon' },
+  { name: 'Hat-Trick Heroes', force: ['Rohan Malhotra', 'Tejas Naik', 'Parth Gill', 'Kunal Deshmukh'], c: 'Ayaan Farooqui', vc: 'Siddharth Rao' },
+  { name: 'Clean Sweep (control)', force: [], noBench: true, c: 'Aaryan Bhatt', vc: 'Siddharth Rao' },
+];
+
+export function buildTeams(squads, xiNames, seed = 7) {
+  const rng = mulberry32(seed);
+  const all = [...squads.BAY, ...squads.DSH];
+  const byName = Object.fromEntries(all.map((p) => [p.name, p]));
+  const pool = new Map(all.map((p) => [p.id, p]));
+  const benched = new Set(all.filter((p) => !xiNames.includes(p.name)).map((p) => p.name));
+  return TEAM_PLANS.map((plan, i) => {
+    const forced = plan.force.map((n) => byName[n].id);
+    const cands = all.filter((p) => !forced.includes(p.id) && !(plan.noBench && benched.has(p.name)));
+    for (let attempt = 0; attempt < 20000; attempt++) {
+      const picked = [...forced];
+      const bag = [...cands];
+      while (picked.length < 11) {
+        const wts = bag.map((p) => Math.pow(p.form, 1.5) * (benched.has(p.name) ? 0.3 : 1));
+        let x = rng() * wts.reduce((a, c) => a + c, 0), k = 0;
+        for (; k < bag.length; k++) { if ((x -= wts[k]) <= 0) break; }
+        picked.push(bag.splice(Math.min(k, bag.length - 1), 1)[0].id);
+      }
+      const c = byName[plan.c].id, vc = byName[plan.vc].id;
+      const ids = picked.includes(c) ? picked : null;
+      if (!ids) { // swap a non-forced pick for the captain
+        const j = picked.findIndex((id) => !forced.includes(id)); picked[j] = c;
+      }
+      if (!picked.includes(vc)) { const j = picked.findIndex((id) => !forced.includes(id) && id !== c); picked[j] = vc; }
+      if (new Set(picked).size === 11 && validate(picked, pool).ok) return { id: `t${i + 1}`, name: plan.name, players: picked, captain: c, vc };
+    }
+    throw new Error('could not build valid team ' + plan.name);
+  });
+}
+
 export function buildSample(seed = 2611) {
   const rng = mulberry32(seed);
   const bay = mkSquad(BAY, 'BAY'), dsh = mkSquad(DSH, 'DSH');
@@ -146,7 +189,10 @@ export function buildSample(seed = 2611) {
 
 if (import.meta.url === `file://${process.argv[1]}`) {
   const seed = Number(process.argv[2] || 2611);
-  const { match, scores } = buildSample(seed);
+  const { match, scores, squads, xiOrder } = buildSample(seed);
+  const teams = buildTeams(squads, [...match.info.players['Bay Blazers'], ...match.info.players['Desert Hawks']]);
+  const meta = { sides: { BAY: 'Bay Blazers', DSH: 'Desert Hawks' }, toss: match.info.toss, squads, xiOrder, teams, notes: ['Bay Blazers rest Rohan Malhotra (niggle).', 'Desert Hawks rest Tejas Naik (workload management).'] };
+  writeFileSync(new URL('../data/sample-meta.json', import.meta.url), JSON.stringify(meta));
   mkdirSync(new URL('../data/', import.meta.url), { recursive: true });
   writeFileSync(new URL('../data/sample-match.json', import.meta.url), JSON.stringify(match));
   console.log(`seed ${seed}: BAY ${scores.i1.runs}/${scores.i1.wk}, DSH ${scores.i2.runs}/${scores.i2.wk}, winner ${match.info.outcome.winner}`);
