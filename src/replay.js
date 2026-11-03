@@ -178,11 +178,14 @@ export function buildReplay(index, matchId, { seed = 7, benchCap = 6, formWindow
     const prior = (index.teamMatches.get(team) || []).filter((i) => index.matches[i].date < date).slice(-teamWindow);
     if (prior.length < 3) throw new ReplayError(`not enough earlier matches for ${team}`);
     const seen = new Map(); // regId -> {name, count, last}
+    const otherXI = new Set(target.info.teams.filter((x) => x !== team).flatMap((x) => target.info.players[x].map((n) => target.info.registry.people[n])));
     for (const i of prior) {
       const m = index.matches[i];
       for (const n of m.info.players[team]) {
         const id = m.info.registry.people[n];
-        if (!id || xiRegIds.has(id)) continue;
+        if (!id || xiRegIds.has(id) || otherXI.has(id)) continue;
+        // a player who has since played for another side (a trade) is not this side's regular
+        if (before(id).at(-1)?.team !== team) continue;
         const cur = seen.get(id) || { name: n, count: 0, last: -1 };
         cur.count++; cur.last = i; cur.name = n; seen.set(id, cur);
       }

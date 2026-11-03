@@ -11,7 +11,10 @@
     "build": "node scripts/build.mjs",
     "e2e": "node scripts/e2e.mjs",
     "shots": "node scripts/shots.mjs",
-    "a11y": "node scripts/a11y.mjs"
+    "a11y": "node scripts/a11y.mjs",
+    "replay:build": "node scripts/build-replay.mjs",
+    "replay:eval": "node scripts/evaluate-replay.mjs",
+    "e2e:replay": "node scripts/e2e-replay.mjs"
   },
   "devDependencies": {
     "axe-core": "^4.14.0",

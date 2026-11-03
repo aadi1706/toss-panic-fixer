@@ -2,6 +2,7 @@
 import sampleMeta from '../data/sample-meta.json' with { type: 'json' };
 import sampleMatch from '../data/sample-match.json' with { type: 'json' };
 import { REPLAYS } from './replay-registry.js';
+import aggregate from '../data/replay/aggregate.json' with { type: 'json' };
 import { makeContext } from './engine.js';
 import { computePoints } from './scoring.js';
 
@@ -28,3 +29,6 @@ export const DATASETS = [
 ];
 
 export const getDataset = (id) => DATASETS.find((d) => d.id === id) || null;
+
+/** Measured results across many real matches (scripts/evaluate-replay.mjs). */
+export const AGGREGATE = aggregate;

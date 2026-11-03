@@ -1,7 +1,7 @@
 // Browser UI. Pure engine code does the work; this file only renders and wires events.
 // Layout model: a team ledger (all 8 teams, scannable) + a repair workspace for the selected team
 // + a context rail (toss report, playing XIs, Ask). On phones the workspace is a bottom sheet.
-import { DATASETS, DEFAULT_ID, getDataset } from './datasets.js';
+import { DATASETS, DEFAULT_ID, AGGREGATE, getDataset } from './datasets.js';
 import { fixTeam, teamStats, LIMITS } from './engine.js';
 import { explainTemplate, noFixText } from './explain.js';
 import { evaluate } from './evaluate.js';
@@ -392,7 +392,14 @@ function fullTime() {
     <p class="honest">${isReplay()
     ? 'A replay of one real match. The match, toss, playing XIs and points are real; squads, roles, credits and the 8 fan teams are inferred or generated. Recommendations used pre-match form only; actual points appear only here. One match is not an accuracy figure.'
     : 'One simulated match with fictional players. Recommendations used pre-match form only; actual points appear only here. This is not a real-world accuracy figure.'}</p>
+    ${isReplay() ? evidence() : ''}
   </section>`;
+}
+
+/** Measured across many real matches (not just this one). Shown only for real replays. */
+function evidence() {
+  const e = AGGREGATE.engine, x = AGGREGATE.engineMinusNaive;
+  return `<p class="honest evidence">Across ${AGGREGATE.matches} real IPL matches (${AGGREGATE.range.slice(0, 4)} to ${AGGREGATE.range.slice(14, 18)}), the same method recovered <b class="num">${e.meanRecovered}%</b> of the gap on average (95% CI ${e.ci95[0]} to ${e.ci95[1]}), and gained points in ${e.positiveShare}% of them. A naive "most expensive replacement" baseline recovered ${AGGREGATE.naiveMostExpensive.meanRecovered}%, so the edge over it is small (${x.meanPercentagePoints} points, CI ${x.ci95[0]} to ${x.ci95[1]}).</p>`;
 }
 
 function footerBar() {

@@ -97,6 +97,17 @@ test('NO HINDSIGHT LEAKAGE: changing what happens in the target match changes no
   assert.notDeepEqual(b.match.innings, a.match.innings, 'while the match itself (used only for evaluation) did change');
 });
 
+test('a player who moved to the other side is not offered as bench for his old team', () => {
+  // Red 13 played for Reds in the earlier matches but is in the Blues XI for the target match
+  const ms = league().map((m) => (m.id === 'target' ? mkMatch('target', '2020-04-20', xi(REDS), [...xi(BLUES).slice(0, 10), 'Red 13']) : m));
+  const { meta } = buildReplay(buildIndex(ms), 'target');
+  const reds = meta.squads.RED.map((p) => p.name);
+  assert.ok(!reds.includes('Red 13'), 'not in the Reds squad');
+  assert.ok(meta.squads.BLU.some((p) => p.name === 'Red 13'), 'he is in the Blues squad');
+  const all = Object.values(meta.squads).flat().map((p) => p.name);
+  assert.equal(new Set(all).size, all.length, 'no player appears twice');
+});
+
 test('replay refuses to build when history is too thin or the match is ineligible', () => {
   const ms = league();
   assert.throws(() => buildReplay(buildIndex(ms), 'm2'), ReplayError, 'too few earlier matches');

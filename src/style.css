@@ -290,7 +290,7 @@ b.cv { display: inline-grid; place-items: center; min-width: 22px; height: 20px;
   .list-h:has(.lang-row) h2 { display: none; }
   .impact b { font-size: 24px; } .impact .hero b { font-size: 32px; }
   .rband { padding: 12px 16px; }
-  .b-team { gap: 8px; } .b-team b { font-size: 14.5px; white-space: nowrap; } .crest { width: 30px; height: 30px; }
+  .b-team { gap: 8px; } .b-team > span { min-width: 0; } .b-team b { font-size: 14.5px; overflow-wrap: anywhere; } .crest { width: 30px; height: 30px; }
   .sheet-wrap { position: fixed; inset: 0; z-index: 30; display: flex; align-items: flex-end; background: rgba(0, 0, 0, .6); }
   .sheet { position: relative; width: 100%; max-height: 92dvh; display: flex; flex-direction: column; background: var(--s1); border-radius: 16px 16px 0 0; animation: rise .22s ease-out; }
   .grab { width: 36px; height: 4px; border-radius: 2px; background: var(--line2); margin: 8px auto 2px; flex: none; }

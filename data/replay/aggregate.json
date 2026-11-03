@@ -1,0 +1,100 @@
+{
+  "method": "For each real IPL match, 3 generated sets of 8 fantasy teams (seeds). Recommendations use only pre-match information. Points are Dream11-style approximations computed from the real deliveries.",
+  "range": "2015-01-01 to 2022-12-31",
+  "source": "Cricsheet.org (ODC-By)",
+  "eligibleMatches": 480,
+  "matches": 319,
+  "runs": 921,
+  "skipped": {
+    "could not build a valid fan team": 189,
+    "role mix too thin to build fantasy teams": 276,
+    "not enough earlier matches for Rising Pune Supergiants": 6,
+    "not enough earlier matches for Gujarat Lions": 9,
+    "not enough earlier matches for Rising Pune Supergiant": 9,
+    "not enough earlier matches for Delhi Capitals": 6,
+    "not enough earlier matches for Punjab Kings": 9,
+    "not enough earlier matches for Lucknow Super Giants": 9,
+    "not enough earlier matches for Gujarat Titans": 6
+  },
+  "seasons": [
+    "2015",
+    "2016",
+    "2017",
+    "2018",
+    "2019",
+    "2020/21",
+    "2021",
+    "2022"
+  ],
+  "engine": {
+    "meanRecovered": 52.8,
+    "medianRecovered": 52.4,
+    "p25": 43.8,
+    "p75": 61.5,
+    "ci95": [
+      51.5,
+      54.2
+    ],
+    "positiveShare": 100,
+    "meanPointsGainedPerRun": 1241
+  },
+  "naiveMostExpensive": {
+    "meanRecovered": 51,
+    "medianRecovered": 51.2,
+    "ci95": [
+      49.6,
+      52.4
+    ],
+    "meanPointsGainedPerRun": 1198.8
+  },
+  "engineMinusNaive": {
+    "meanPercentagePoints": 1.8,
+    "ci95": [
+      0.6,
+      3.1
+    ],
+    "engineBetterShare": 56.7
+  },
+  "caveats": [
+    "Credits are approximated from pre-match form in these replays, so the \"most expensive replacement\" baseline is effectively a form baseline and strong by construction.",
+    "Fantasy teams are generated; a real fan's teams would differ.",
+    "Points use an approximation of Dream11 T20 scoring, computed from the real deliveries.",
+    "Matches are skipped when a valid pool cannot be built (role mix, credit cap) or earlier history is thin; the skip counts are listed above.",
+    "Only IPL matches with exactly 11 listed per side (2015 to 2022) are used, to avoid impact-player leakage."
+  ],
+  "hindsightMeanPointsGainedPerRun": 2373.4,
+  "bySeason": {
+    "2015": {
+      "matches": 49,
+      "meanRecovered": 52.6
+    },
+    "2016": {
+      "matches": 47,
+      "meanRecovered": 55.7
+    },
+    "2017": {
+      "matches": 37,
+      "meanRecovered": 52.5
+    },
+    "2018": {
+      "matches": 46,
+      "meanRecovered": 53.1
+    },
+    "2019": {
+      "matches": 39,
+      "meanRecovered": 54.5
+    },
+    "2021": {
+      "matches": 32,
+      "meanRecovered": 53.8
+    },
+    "2022": {
+      "matches": 30,
+      "meanRecovered": 47.3
+    },
+    "2020/21": {
+      "matches": 39,
+      "meanRecovered": 51.5
+    }
+  }
+}
