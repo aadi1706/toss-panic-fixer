@@ -78,7 +78,7 @@ function swapRows(opt) {
   return `<ul class="swaps">${opt.swaps.map((s) => {
     const o = P(s.out), i = P(s.in);
     const d = Math.round((i.credits - o.credits) * 10) / 10;
-    return `<li class="swap"><span class="from"><s>${esc(o.name)}</s></span>
+    return `<li class="swap"><span class="from"><span class="sr">Out: </span><s>${esc(o.name)}</s></span>
       <svg class="arr" viewBox="0 0 20 12" aria-hidden="true"><path d="M1 6h16m-5-5 5 5-5 5" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>
       <span class="to r-${i.role}"><i class="rl">${i.role}</i><b>${esc(i.name)}</b></span>
       <em class="num">${i.credits} cr <span class="${d > 0 ? 'up' : d < 0 ? 'down' : ''}">${d > 0 ? '+' : d < 0 ? '−' : '±'}${Math.abs(d)}</span></em></li>`;
@@ -88,7 +88,7 @@ function swapRows(opt) {
 function leaderChange(team, opt) {
   const one = (tag, was, now) => (was === now
     ? `<span class="stay"><b>${tag}</b>${esc(P(now).name)} stays</span>`
-    : `<span><b>${tag}</b><s>${esc(P(was).name)}</s> to <strong>${esc(P(now).name)}</strong></span>`);
+    : `<span><b>${tag}</b><span class="sr">was </span><s>${esc(P(was).name)}</s> to <strong>${esc(P(now).name)}</strong></span>`);
   return `<div class="lchange">${one('C', team.captain, opt.captain)}${one('VC', team.vc, opt.vc)}</div>`;
 }
 
@@ -144,8 +144,8 @@ function teamCard(team) {
     ${scoreRow(team)}${composition(team.players, { legend: false })}
     ${pills(fix.out, { captain: team.captain, vc: team.vc, outSet })}
     <details class="more keep"><summary>${stay.length} still playing</summary>${pillsByRole(stay, { captain: team.captain, vc: team.vc })}</details>
-    <div class="opts" role="tablist" aria-label="Fix options for ${esc(team.name)}">
-      ${fix.options.map((o, i) => `<button role="tab" aria-selected="${i === idx}" data-opt="${team.id}:${i}"><span>${i === 0 ? 'Best fix' : 'Option ' + (i + 1)}</span><small class="num">+${fmt(o.projGain)} proj</small></button>`).join('')}
+    <div class="opts" role="group" aria-label="Fix options for ${esc(team.name)}">
+      ${fix.options.map((o, i) => `<button aria-pressed="${i === idx}" data-opt="${team.id}:${i}"><span>${i === 0 ? 'Best fix' : 'Option ' + (i + 1)}</span><small class="num">+${fmt(o.projGain)} proj</small></button>`).join('')}
     </div>
     <div class="cmp" aria-label="Before and after this fix">
       <div><span>Players out</span><b class="num">${fix.out.length}<i>to</i>0</b></div>
@@ -153,7 +153,7 @@ function teamCard(team) {
       <div><span>Projected</span><b class="num pos">+${fmt(opt.projGain)}</b></div>
     </div>
     ${swapRows(opt)}${leaderChange(team, opt)}
-    <p class="why"><span class="src">${x.ai ? 'AI' : 'Built-in'}</span>${esc(x.text)}</p>
+    <p class="why"${state.lang === 'hinglish' ? ' lang="hi-Latn"' : ''}><span class="src">${x.ai ? 'AI' : 'Built-in'}</span>${esc(x.text)}</p>
     <footer><span class="left"><b class="num">${opt.creditsLeft}</b> cr left</span><button class="apply" data-apply="${team.id}">Apply fix</button></footer>
   </article>`;
 }
@@ -200,18 +200,18 @@ function xiRow(id, i) {
 function tossNews() {
   const t = meta.toss;
   const benched = (s) => meta.squads[s].filter((p) => !ctx.xi.has(p.id));
-  const side = (s) => `<div class="xi-side"><h4>${esc(sides[s])}</h4>
+  const side = (s) => `<div class="xi-side"><h3>${esc(sides[s])}</h3>
       <ol>${meta.xiOrder[s].map(xiRow).join('')}</ol>
       ${benched(s).length ? `<p class="bench">Not playing</p><ul class="benchlist">${benched(s).map((p) => `<li class="r-${p.role}"><i class="rl">${p.role}</i><s>${esc(p.name)}</s></li>`).join('')}</ul>` : ''}</div>`;
-  return `<section class="news" data-panel="xi"><div class="lower"><b>${esc(t.winner)}</b> won the toss and chose to ${esc(t.decision)}</div>
+  return `<section class="news" data-panel="xi"><h2 class="sr">Toss and playing XIs</h2><div class="lower"><b>${esc(t.winner)}</b> won the toss and chose to ${esc(t.decision)}</div>
     <ul class="notes">${meta.notes.map((n) => `<li>${esc(n)}</li>`).join('')}</ul>
     <details class="xi" ${state.xiOpen ? 'open' : ''}><summary>Confirmed playing XIs</summary><div class="xi-grid">${side('BAY')}${side('DSH')}</div></details></section>`;
 }
 
 function coinOverlay() {
   const t = meta.toss;
-  return `<div id="coin" class="coin-wrap" role="status"><div class="coin"><i>T</i><i>H</i></div>
-    <p><b>${esc(t.winner)}</b> won the toss<span>and chose to ${esc(t.decision)}</span></p><small>Tap to skip</small></div>`;
+  return `<div id="coin" class="coin-wrap" role="dialog" aria-modal="true" aria-label="Toss result" tabindex="-1"><div class="coin"><i>T</i><i>H</i></div>
+    <p><b>${esc(t.winner)}</b> won the toss<span>and chose to ${esc(t.decision)}</span></p><small>Tap or press Escape to skip</small></div>`;
 }
 
 /* ---------- AI controls (unchanged behaviour) ---------- */
@@ -233,8 +233,8 @@ function askBox() {
     <form data-ask><input name="q" maxlength="300" placeholder="e.g. Is swapping Tejas Naik for Harsh Menon valid in t1?" value="${esc(a.q)}" aria-label="Your question" autocomplete="off">
       <button class="apply" ${a.loading ? 'disabled' : ''}>${a.loading ? 'Checking…' : 'Ask'}</button></form>
     <div class="chips">${chips.map((c) => `<button type="button" data-chip="${esc(c)}">${esc(c)}</button>`).join('')}</div>
-    ${a.answer ? `<div class="answer"><p>${esc(a.answer)}</p><small>Checked with the real engine: ${a.tools.length ? a.tools.map((t) => `<code>${esc(t)}</code>`).join(' ') : 'no tools used'}. Projections use pre-match form only.</small></div>` : ''}
-    ${a.error ? `<p class="aierr" role="status">${esc(a.error)}</p>` : ''}</details>`;
+    <div aria-live="polite">${a.answer ? `<div class="answer"><p>${esc(a.answer)}</p><small>Checked with the real engine: ${a.tools.length ? a.tools.map((t) => `<code>${esc(t)}</code>`).join(' ') : 'no tools used'}. Projections use pre-match form only.</small></div>` : ''}
+    ${a.error ? `<p class="aierr">${esc(a.error)}</p>` : ''}</div></details>`;
 }
 
 /* ---------- full time ---------- */
@@ -273,7 +273,7 @@ function teamRow(team) {
   const fix = state.fixes.get(team.id);
   const applied = state.applied.get(team.id);
   const name = esc(team.name);
-  const open = (inner) => `<button class="open" data-open="${team.id}" aria-label="Open ${name}">${inner}</button>`;
+  const open = (inner) => `<button class="open" data-open="${team.id}">${inner}</button>`;
   if (!fix.broken) {
     return `<div class="trow fine">${open(`<span class="tn">${name}</span><span class="ts ok">All 11 playing</span>`)}<span class="pillst ok">Fine</span>${chev}</div>`;
   }
@@ -294,7 +294,7 @@ function resultRow(team) {
   const max = Math.max(...e.rows.map((x) => x.hind), 1);
   const w = (v) => `${(v / max) * 100}%`;
   const gain = r.mine - r.none;
-  return `<div class="trow result"><button class="open" data-open="${team.id}" aria-label="Open ${esc(team.name)}">
+  return `<div class="trow result"><button class="open" data-open="${team.id}">
     <span class="rtop"><span class="tn">${esc(team.name)}</span><span class="rg num ${gain > 0 ? 'pos' : ''}">${gain > 0 ? '+' + fmt(gain) : 'no change'}</span></span>
     <span class="stack" role="img" aria-label="Without ${fmt(r.none)}, with fixes ${fmt(r.mine)}, hindsight best ${fmt(r.hind)}"><i class="s0" style="width:${w(r.none)}"></i><i class="s1" style="width:${w(gain)}"></i><i class="s2" style="width:${w(r.hind - r.mine)}"></i></span>
     <span class="rnums num"><span><i class="s0"></i>${fmt(r.none)}</span><span><i class="s1"></i>${fmt(r.mine)}</span><span><i class="s2"></i>${fmt(r.hind)}</span></span></button>${chev}</div>`;
@@ -303,7 +303,7 @@ function resultRow(team) {
 function sheet() {
   const team = teams.find((t) => t.id === state.sheet);
   if (!team) return '';
-  return `<div class="sheet-wrap"><div class="sheet" role="dialog" aria-modal="true" aria-label="${esc(team.name)}">
+  return `<div class="sheet-wrap"><div class="sheet" role="dialog" aria-modal="true" aria-label="${esc(team.name)}, repair details" tabindex="-1">
     <div class="grab" aria-hidden="true"></div>
     <button class="x" data-closesheet aria-label="Close"><svg viewBox="0 0 14 14" aria-hidden="true"><path d="m2 2 10 10M12 2 2 12" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg></button>
     <div class="sheet-body">${teamCard(team)}</div></div></div>`;
@@ -311,8 +311,8 @@ function sheet() {
 
 function tabs() {
   const left = [...state.fixes.values()].filter((f) => f.broken && !f.impossible && !state.applied.has(f.teamId)).length;
-  const t = (id, label, badge = '') => `<button role="tab" data-tab="${id}" aria-selected="${state.tab === id}">${label}${badge}</button>`;
-  return `<nav class="tabs" role="tablist" aria-label="Sections">${t('teams', 'My teams', left ? `<i>${left}</i>` : '')}${t('xi', 'Playing XIs')}${t('ask', 'Ask')}</nav>`;
+  const t = (id, label, badge = '') => `<button data-tab="${id}" aria-current="${state.tab === id ? 'page' : 'false'}">${label}${badge}</button>`;
+  return `<nav class="tabs" aria-label="Sections">${t('teams', 'My teams', left ? `<i><span aria-hidden="true">${left}</span><span class="sr">${left} to fix</span></i>` : '')}${t('xi', 'Playing XIs')}${t('ask', 'Ask')}</nav>`;
 }
 
 function showToast(msg) {
@@ -330,8 +330,30 @@ function preCard(t) {
     ${composition(t.players, { legend: false })}${leaders(t)}</summary>${pillsByRole(t.players, { captain: t.captain, vc: t.vc })}</details></article>`;
 }
 
+/* ---------- focus management: render() rebuilds the DOM, so keyboard focus must be put back ---------- */
+
+function focusSelector(el) {
+  if (!el || el === document.body || !el.closest?.('#app')) return null;
+  if (el.name) return `${el.tagName.toLowerCase()}[name="${el.name}"]`;
+  const [k, v] = Object.entries(el.dataset)[0] || [];
+  return k ? `${el.tagName.toLowerCase()}[data-${k.replace(/[A-Z]/g, (c) => '-' + c.toLowerCase())}="${CSS.escape(v)}"]` : null;
+}
+// If the focused control disappears (e.g. Apply fix becomes Undo), land on its natural successor.
+const FOCUS_FALLBACK = {
+  apply: (v) => [`[data-undo="${v}"]`, `[data-open="${v}"]`],
+  undo: (v) => [`[data-apply="${v}"]`, `[data-open="${v}"]`],
+  fixall: () => ['[data-act=play]'],
+  reset: () => ['[data-act=toss]'],
+};
+let wasSheet = false;
+let opener = null;
+
 function render() {
   const app = $('#app');
+  const active = document.activeElement;
+  const sel = focusSelector(active);
+  const [fk, fv] = Object.entries(active?.dataset || {})[0] || [];
+  const caret = active?.name ? [active.selectionStart, active.selectionEnd] : null;
   let side = '';
   let main = '';
   if (state.phase === 'pre') {
@@ -353,14 +375,29 @@ function render() {
   const keep = sheetBody ? sheetBody.scrollTop : 0;
   app.className = state.fresh ? 'fresh' : '';
   if (state.phase === 'toss') app.dataset.tab = state.tab; else delete app.dataset.tab;
-  app.innerHTML = `${topbar()}${matchHeader()}${state.phase === 'toss' ? tabs() : ''}<div class="shell"><aside>${side}<nav class="bar" aria-label="Actions">${footerBar()}</nav></aside><main data-panel="teams">${main}</main></div>${state.sheet ? sheet() : ''}${state.coin ? coinOverlay() : ''}`;
+  // While the sheet or toss dialog is open, the page behind it is inert: no focus, no screen-reader reach.
+  const inert = state.sheet || state.coin ? ' inert' : '';
+  app.innerHTML = `<a class="skip" href="#teams-main">Skip to teams</a><div class="page"${inert}>${topbar()}${matchHeader()}${state.phase === 'toss' ? tabs() : ''}<main id="teams-main" tabindex="-1"><div class="shell"><div class="rail" role="region" aria-label="Match summary and actions">${side}<nav class="bar" aria-label="Actions">${footerBar()}</nav></div><section class="teamlist" data-panel="teams" aria-label="Your teams">${main}</section></div></main></div>${state.sheet ? sheet() : ''}${state.coin ? coinOverlay() : ''}`;
   document.documentElement.classList.toggle('lock', !!state.sheet);
   if (state.sheet && keep) $('.sheet-body').scrollTop = keep;
+
+  if (state.sheet && !wasSheet) $('.sheet')?.focus();
+  else if (state.coin) $('#coin')?.focus();
+  else if (!state.sheet && wasSheet && opener) { [...document.querySelectorAll(`[data-open="${opener}"]`)].find((n) => n.offsetParent !== null)?.focus({ preventScroll: true }); }
+  else if (sel) {
+    const visible = (q) => [...document.querySelectorAll(q)].find((n) => n.offsetParent !== null);
+    const target = visible(sel) || (FOCUS_FALLBACK[fk] || (() => []))(fv).map(visible).find(Boolean);
+    if (target) { target.focus({ preventScroll: true }); if (caret && target.setSelectionRange) target.setSelectionRange(...caret); }
+  }
+  wasSheet = !!state.sheet;
 }
 
 function endCoin() {
+  if (!state.coin) return;
   state.coin = false;
   $('#coin')?.remove();
+  $('.page')?.removeAttribute('inert');
+  $('#teams-main')?.focus({ preventScroll: true });
 }
 
 function toss() {
@@ -429,6 +466,7 @@ document.addEventListener('click', (e) => { if (e.target.closest('#coin')) endCo
 
 // Phone navigation: tabs, bottom sheet (with browser back support), and action feedback.
 function openSheet(id) {
+  opener = id;
   state.sheet = id;
   history.pushState({ sheet: id }, '');
   render();
@@ -438,7 +476,27 @@ function closeSheet() {
   else { state.sheet = null; render(); }
 }
 window.addEventListener('popstate', () => { if (state.sheet) { state.sheet = null; render(); } });
-document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && state.sheet) closeSheet(); });
+document.addEventListener('keydown', (e) => {
+  if (e.key === 'Tab' && (state.sheet || state.coin)) {
+    const box = $(state.coin ? '#coin' : '.sheet');
+    const items = [...box.querySelectorAll('button, [href], input, summary, [tabindex]:not([tabindex="-1"])')].filter((n) => n.offsetParent !== null || n.tagName === 'SUMMARY');
+    if (!items.length) return e.preventDefault();
+    const first = items[0], last = items[items.length - 1];
+    if (!box.contains(document.activeElement) || document.activeElement === box) { e.preventDefault(); (e.shiftKey ? last : first).focus(); }
+    else if (e.shiftKey && document.activeElement === first) { e.preventDefault(); last.focus(); }
+    else if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first.focus(); }
+    return;
+  }
+  if (e.key !== 'Escape') return;
+  if (state.coin) endCoin();
+  else if (state.sheet) closeSheet();
+});
+// Skip link: move focus without adding a history entry (the sheet uses history for the back button).
+document.addEventListener('click', (e) => {
+  if (!e.target.closest?.('.skip')) return;
+  e.preventDefault();
+  $('#teams-main')?.focus();
+});
 document.addEventListener('click', (e) => {
   if (e.target.classList?.contains('sheet-wrap')) return closeSheet();
   const b = e.target.closest('button');

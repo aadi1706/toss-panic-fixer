@@ -10,9 +10,11 @@
     "sample": "node scripts/gen-sample.mjs",
     "build": "node scripts/build.mjs",
     "e2e": "node scripts/e2e.mjs",
-    "shots": "node scripts/shots.mjs"
+    "shots": "node scripts/shots.mjs",
+    "a11y": "node scripts/a11y.mjs"
   },
   "devDependencies": {
+    "axe-core": "^4.14.0",
     "esbuild": "^0.28.2",
     "playwright": "^1.64.1"
   },

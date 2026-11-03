@@ -63,7 +63,7 @@ async function scenario(browser, label, { width, height, phone }) {
     await t1();
     ok(await p.evaluate(() => !!history.state?.sheet), 'sheet open and pushed to history');
     await press('.sheet [data-opt="t1:1"]');
-    ok((await p.getAttribute('.sheet [data-opt="t1:1"]', 'aria-selected')) === 'true', 'option 2 selectable in sheet');
+    ok((await p.getAttribute('.sheet [data-opt="t1:1"]', 'aria-pressed')) === 'true', 'option 2 selectable in sheet');
     await p.goBack(); await p.waitForSelector('.sheet', { state: 'detached' });
     ok(true, 'browser back closes the sheet');
     await t1(); await p.mouse.click(width / 2, 20); await p.waitForSelector('.sheet', { state: 'detached' });
@@ -73,7 +73,7 @@ async function scenario(browser, label, { width, height, phone }) {
     ok(/Powerplay Pandits fixed/.test(await p.textContent('#toast')), 'apply from sheet closes it and shows a toast');
   } else {
     await p.click('[data-opt="t1:1"]');
-    ok((await p.getAttribute('[data-opt="t1:1"]', 'aria-selected')) === 'true', 'option 2 selectable');
+    ok((await p.getAttribute('[data-opt="t1:1"]', 'aria-pressed')) === 'true', 'option 2 selectable');
     await p.click('[data-opt="t1:0"]');
     await p.click('.dcards [data-apply="t1"]');
   }
