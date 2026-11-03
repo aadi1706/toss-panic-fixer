@@ -1,18 +1,17 @@
 {
   "name": "toss-panic-fixer",
   "version": "1.0.0",
-  "description": "",
-  "main": "index.js",
+  "description": "Fix every fantasy cricket team in seconds after the toss",
   "directories": {
     "test": "tests"
   },
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "test": "node --test tests/*.test.js",
+    "sample": "node scripts/gen-sample.mjs",
+    "build": "node scripts/build.mjs"
   },
-  "keywords": [],
-  "author": "",
-  "license": "ISC",
   "devDependencies": {
     "esbuild": "^0.28.2"
-  }
+  },
+  "type": "module"
 }
