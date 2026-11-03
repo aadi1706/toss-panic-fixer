@@ -52,6 +52,7 @@ aside > section, aside > .bar { margin-bottom: 12px; }
 .impact .hero b { font-size: 46px; font-weight: 800; line-height: 1; color: var(--danger); letter-spacing: -.03em; }
 .impact .hero b small { font-size: 20px; color: var(--muted); font-weight: 700; letter-spacing: 0; }
 .impact .hero span { font-weight: 800; font-size: 15px; line-height: 1.2; }
+.impact .hero i { font-style: normal; }
 .impact .hero em { display: block; font-style: normal; font-weight: 600; font-size: 12.5px; color: var(--accent); margin-top: 3px; }
 .impact .cell { padding: 10px 12px; border-right: 1px solid var(--line); }
 .impact .cell:last-child { border-right: 0; }
@@ -237,6 +238,7 @@ details[open] > summary::after { content: "−"; }
   main > .list-h { grid-column: 1 / -1; margin-top: 0; }
   .team { margin: 0; }
 }
+@media (min-width: 900px) { .dcards { display: contents; } }
 @media (min-width: 1300px) { .shell { grid-template-columns: 420px 1fr; } .bar { width: 420px; } }
 
 /* second pass */
@@ -260,3 +262,108 @@ details.ask > summary h2 { font-size: 14px; }
 details.ask[open] { padding-bottom: 12px; }
 details.ask form { margin-top: 0; }
 @media (max-width: 899px) { details.ask > summary span { display: none; } }
+
+/* ===== phone app shell ===== */
+.tabs, .mrows, .sheet-wrap { display: none; }
+.groups .grp h5 { display: flex; align-items: center; gap: 6px; margin: 10px 0 5px; font-size: 11.5px; font-weight: 800; color: var(--c); }
+.groups .grp h5 b { color: var(--muted); font-weight: 700; }
+.pills.one { margin-top: 0; }
+.pills.one .pl { display: flex; align-items: center; gap: 6px; padding: 7px 8px; }
+.pills.one .pl .rl { display: none; }
+.pills.one .pl .nm { flex: 1; }
+.pills.one .pl .sub { margin: 0; flex: none; }
+.pills.one .pl .cr { margin: 0 2px 0 0; order: 2; }
+.pills.one .pl .cv, .pills.one .pl .tg { order: 1; }
+.cmp { display: grid; grid-template-columns: repeat(3, 1fr); margin: 10px 0 4px; border: 1px solid var(--line); border-radius: 4px; background: var(--bg2); }
+.cmp > div { padding: 7px 8px; border-right: 1px solid var(--line); } .cmp > div:last-child { border-right: 0; }
+.cmp span { display: block; font-size: 10.5px; font-weight: 700; color: var(--muted); }
+.cmp b { font-size: 15px; font-weight: 800; white-space: nowrap; } .cmp b i { font-style: normal; font-size: 10px; font-weight: 600; color: var(--muted); margin: 0 4px; }
+.cmp .pos { color: var(--accent); }
+.s0 { background: #51636e; } .s1 { background: var(--accent); } .s2 { background: color-mix(in srgb, var(--warn) 75%, var(--bg)); }
+.rlegend { display: none; }
+#toast { position: fixed; left: 50%; bottom: calc(86px + env(safe-area-inset-bottom)); transform: translate(-50%, 12px); z-index: 40; max-width: calc(100vw - 32px); padding: 11px 16px; background: var(--ink); color: var(--bg); border-radius: var(--r); font-weight: 800; font-size: 14px; opacity: 0; pointer-events: none; transition: opacity .18s, transform .18s; }
+#toast.show { opacity: 1; transform: translate(-50%, 0); }
+
+@media (max-width: 899px) {
+  html.lock { overflow: hidden; }
+  .fresh .xr { animation: none; } /* the XI panel is its own tab here; never hide its rows behind a delayed reveal */
+  .dcards { display: none; }
+  .mrows { display: block; }
+  .impact .hero i { display: none; }
+  /* 1) navigation: sticky section tabs instead of one long scroll */
+  .tabs { display: flex; position: sticky; top: 0; z-index: 6; margin: 10px -14px 0; padding: 0 14px; background: var(--bg); border-bottom: 1px solid var(--line); }
+  .tabs button { flex: 1; min-height: 48px; background: none; border: 0; font-weight: 700; font-size: 14.5px; color: var(--muted); cursor: pointer; display: inline-flex; align-items: center; justify-content: center; gap: 6px; }
+  .tabs button[aria-selected="true"] { color: var(--ink); box-shadow: inset 0 -3px var(--accent); }
+  .tabs i { font-style: normal; font-size: 11.5px; font-weight: 800; background: var(--danger); color: #1a0405; border-radius: 9px; padding: 1px 6px; }
+  #app[data-tab="teams"] [data-panel="xi"], #app[data-tab="teams"] [data-panel="ask"],
+  #app[data-tab="xi"] [data-panel="teams"], #app[data-tab="xi"] [data-panel="ask"],
+  #app[data-tab="ask"] [data-panel="teams"], #app[data-tab="ask"] [data-panel="xi"] { display: none; }
+  #app[data-tab] .shell { margin-top: 10px; }
+  /* 2) information density: the four numbers sit in one strip */
+  .impact { grid-template-columns: 1.35fr 1fr 1fr 1fr; margin-top: 0; }
+  .impact .hero { grid-column: auto; flex-direction: column; align-items: flex-start; gap: 2px; padding: 10px 12px; border-bottom: 0; border-right: 1px solid var(--line); }
+  .impact .hero b { font-size: 34px; } .impact .hero b small { font-size: 15px; }
+  .impact .hero span { font-size: 12px; line-height: 1.2; } .impact .hero em { font-size: 11.5px; margin-top: 1px; }
+  .impact .cell { padding: 10px 8px 10px 10px; } .impact .cell b { font-size: 24px; } .impact .cell span { font-size: 11px; }
+  main > .list-h:has(.lang-row) { margin: 12px 0 8px; }
+  main > .list-h:has(.lang-row) h2 { display: none; }
+  main > .list-h .lang-row { width: 100%; justify-content: space-between; }
+  .rlegend { display: flex; gap: 14px; margin: 0 0 8px; font-size: 11.5px; font-weight: 700; color: var(--muted); }
+  .rlegend span, .rnums span { display: inline-flex; align-items: center; gap: 5px; }
+  .rlegend i, .rnums i { width: 8px; height: 8px; border-radius: 2px; display: inline-block; }
+  /* 3) team list rows with a one-tap fix */
+  .trow { position: relative; display: flex; align-items: stretch; margin-bottom: 8px; background: var(--panel); border: 1px solid var(--line); border-radius: var(--r); overflow: hidden; }
+  .trow::before { content: ""; position: absolute; left: 0; top: 0; bottom: 0; width: 4px; background: var(--line2); }
+  .trow.broken::before { background: var(--danger); } .trow.fine::before, .trow.fixed::before { background: var(--accent); }
+  .trow .open { flex: 1; min-width: 0; display: flex; flex-direction: column; justify-content: center; gap: 4px; padding: 11px 8px 11px 16px; min-height: 66px; text-align: left; background: none; border: 0; cursor: pointer; }
+  .tn { font-weight: 800; font-size: 15.5px; letter-spacing: -.01em; }
+  .ts { display: flex; flex-wrap: wrap; align-items: center; gap: 2px 10px; font-size: 12.5px; font-weight: 600; color: var(--muted); }
+  .ts .bad { color: #ff8d93; } .ts .ok { color: var(--accent); } .ts .gain { color: var(--accent); }
+  .fl { font-size: 11px; font-weight: 800; padding: 1px 6px; border: 1px solid currentColor; border-radius: 3px; }
+  .fl.bad { color: #ff8d93; } .fl.warn { color: var(--warn); }
+  .qa { flex: none; align-self: center; min-width: 66px; min-height: 46px; margin: 0 10px 0 4px; background: var(--accent); color: #04130d; border: 0; border-radius: var(--r); font-weight: 800; font-size: 15px; cursor: pointer; }
+  .pillst { align-self: center; margin-right: 8px; font-size: 12px; font-weight: 800; padding: 3px 8px; border-radius: 4px; }
+  .pillst.ok { background: color-mix(in srgb, var(--accent) 18%, transparent); color: var(--accent); }
+  .trow .chev { flex: none; align-self: center; width: 8px; height: 14px; margin-right: 12px; color: var(--muted); }
+  .trow.result .open { gap: 6px; }
+  .rtop { display: flex; justify-content: space-between; align-items: baseline; }
+  .rg { font-weight: 800; font-size: 14px; color: var(--muted); } .rg.pos { color: var(--accent); }
+  .stack { display: flex; height: 8px; border-radius: 2px; overflow: hidden; background: var(--bg2); }
+  .stack i { display: block; height: 100%; }
+  .rnums { display: flex; justify-content: space-between; font-size: 12px; font-weight: 700; color: var(--muted); }
+  /* pre-toss rows */
+  .team.pre { margin-bottom: 8px; } .team.pre summary { padding: 10px 12px 10px 15px; }
+  .team.pre .sm-h { display: flex; align-items: center; justify-content: space-between; }
+  .team.pre .sm-h .cl { font-size: 12.5px; font-weight: 600; color: var(--muted); margin-left: auto; margin-right: 8px; } .team.pre .sm-h .cl b { color: var(--ink); }
+  .team.pre .leaders { margin-top: 6px; font-size: 12.5px; }
+  .team.pre .comp { margin-top: 7px; }
+  .team.pre .groups { padding: 0 12px 10px 15px; }
+  /* 4) bottom sheet for team detail */
+  .sheet-wrap { position: fixed; inset: 0; z-index: 30; display: flex; align-items: flex-end; background: rgba(5, 8, 10, .72); }
+  .sheet { position: relative; width: 100%; max-height: 92dvh; display: flex; flex-direction: column; background: var(--bg); border-top: 1px solid var(--line2); border-radius: 14px 14px 0 0; animation: rise .22s ease-out; }
+  .grab { width: 38px; height: 4px; border-radius: 2px; background: var(--line2); margin: 8px auto 2px; flex: none; }
+  .sheet .x { position: absolute; top: 4px; right: 4px; width: 44px; height: 44px; display: grid; place-items: center; background: none; border: 0; color: var(--muted); cursor: pointer; z-index: 2; }
+  .sheet .x svg { width: 14px; height: 14px; }
+  .sheet-body { overflow-y: auto; overscroll-behavior: contain; padding: 6px 12px calc(14px + env(safe-area-inset-bottom)); }
+  .sheet .team { margin: 0; padding-top: 14px; }
+  .sheet .team > header { padding-right: 38px; gap: 6px; }
+  .sheet .team > header h3 { flex-basis: 100%; margin: 0; font-size: 18px; }
+  .sheet .team footer { position: sticky; bottom: -14px; margin: 12px -12px -12px -15px; padding: 12px 12px calc(12px + env(safe-area-inset-bottom)) 15px; background: var(--panel); border-top: 1px solid var(--line); }
+  .sheet .apply { max-width: none; }
+  @keyframes rise { from { transform: translateY(40px); opacity: .6; } to { transform: none; opacity: 1; } }
+  #toast { bottom: calc(80px + env(safe-area-inset-bottom)); }
+}
+@media (max-width: 899px) and (prefers-reduced-motion: reduce) { .sheet { animation: none; } }
+@media (max-width: 380px) {
+  #app { padding-left: 12px; padding-right: 12px; }
+  .tabs { margin-left: -12px; margin-right: -12px; padding: 0 12px; }
+  .brand h1 { font-size: 15px; } .sample { font-size: 10px; padding: 4px 6px; }
+  .tm b { font-size: 13.5px; } .crest { width: 28px; height: 28px; font-size: 9.5px; }
+  .impact .hero { padding: 9px 9px; } .impact .cell { padding: 9px 6px 9px 9px; }
+  .impact .hero b { font-size: 30px; } .impact .cell b { font-size: 22px; } .impact .cell span { font-size: 10.5px; }
+  .tn { font-size: 15px; } .qa { min-width: 58px; }
+  .aibtn, .lang button { padding: 0 10px; font-size: 12.5px; }
+  .cmp b { font-size: 14px; }
+}
+
+.pills:not(.one) .pl .nm { white-space: normal; overflow-wrap: anywhere; }

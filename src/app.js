@@ -17,8 +17,11 @@ const state = {
   ask: { q: '', loading: false, answer: '', tools: [], error: '' },
   coin: false, // toss reveal overlay is showing
   fresh: false, // XIs are animating in
-  xiOpen: window.innerWidth >= 900,
-  askOpen: window.innerWidth >= 900,
+  xiOpen: true,
+  askOpen: true,
+  tab: 'teams', // phone only: teams | xi | ask
+  sheet: null, // phone only: team id shown in the bottom sheet
+  toast: '',
 };
 
 const $ = (s, el = document) => el.querySelector(s);
@@ -43,6 +46,16 @@ function pills(ids, { captain = null, vc = null, outSet = null, newIds = [] } = 
   return `<ul class="pills">${sorted.map((id) => pill(id, {
     out: !!outSet && outSet.has(id), cap: id === captain ? 'C' : id === vc ? 'VC' : null, isNew: newIds.includes(id),
   })).join('')}</ul>`;
+}
+
+/** Players grouped under role headings: denser, and the role chip is not repeated on every pill. */
+function pillsByRole(ids, opts = {}) {
+  const { captain = null, vc = null, newIds = [] } = opts;
+  return `<div class="groups">${ROLES.map((r) => {
+    const g = ids.filter((id) => P(id).role === r).sort((a, b) => P(b).credits - P(a).credits);
+    if (!g.length) return '';
+    return `<section class="grp r-${r}"><h5>${r}<b>${g.length}</b></h5><ul class="pills one">${g.map((id) => pill(id, { cap: id === captain ? 'C' : id === vc ? 'VC' : null, isNew: newIds.includes(id) })).join('')}</ul></section>`;
+  }).join('')}</div>`;
 }
 
 /** Role split bar + credits + side split for a set of 11 players. */
@@ -102,7 +115,7 @@ function teamCard(team) {
     return `<article class="team fine"><header><h3>${esc(team.name)}</h3><span class="st ok">Fine</span></header>
       <p class="line">All 11 players are in the playing XI. Nothing to fix.</p>
       ${scoreRow(team)}${composition(team.players, { legend: false })}${leaders(team)}
-      <details class="more"><summary>View players</summary>${pills(team.players)}</details></article>`;
+      <details class="more"><summary>View players</summary>${pillsByRole(team.players, { captain: team.captain, vc: team.vc })}</details></article>`;
   }
   const outSet = new Set(fix.out);
   const alert = fix.captainOut ? '<span class="st bad soft">Captain out</span>' : fix.vcOut ? '<span class="st warn soft">VC out</span>' : '';
@@ -111,14 +124,14 @@ function teamCard(team) {
     return `<article class="team fixed"><header><h3>${esc(team.name)}</h3><span class="st ok">Fixed</span></header>
       <p class="line"><span><b>${applied.swaps.length}</b> ${applied.swaps.length === 1 ? 'swap' : 'swaps'} applied</span><span class="cl"><b>${fmt(applied.stats.credits)}</b> / 100 cr</span></p>
       ${scoreRow(team)}${composition(applied.players, { legend: false })}${leaderChange(team, applied)}
-      <details class="more"><summary>Swaps and new XI</summary>${swapRows(applied)}${pills(applied.players, { captain: applied.captain, vc: applied.vc, newIds: applied.ins })}</details>
+      <details class="more"><summary>Swaps and new XI</summary>${swapRows(applied)}${pillsByRole(applied.players, { captain: applied.captain, vc: applied.vc, newIds: applied.ins })}</details>
       ${played ? '' : `<button class="ghost" data-undo="${team.id}">Undo fix</button>`}</article>`;
   }
   if (fix.impossible) {
     return `<article class="team broken"><header><h3>${esc(team.name)}</h3><span class="st bad">Broken</span>${alert}</header>
       <p class="line"><span><b>${fix.out.length}</b> of 11 players are out</span></p>
       ${scoreRow(team)}${composition(team.players, { legend: false })}${pills(fix.out, { captain: team.captain, vc: team.vc, outSet })}
-      <details class="more keep"><summary>${team.players.length - fix.out.length} still playing</summary>${pills(team.players.filter((id) => !outSet.has(id)), { captain: team.captain, vc: team.vc })}</details>
+      <details class="more keep"><summary>${team.players.length - fix.out.length} still playing</summary>${pillsByRole(team.players.filter((id) => !outSet.has(id)), { captain: team.captain, vc: team.vc })}</details>
       <div class="nofix"><b>No valid fix</b><p>${esc(noFixText(team, fix, ctx, state.lang))}</p></div></article>`;
   }
   const idx = state.pick.get(team.id) ?? 0;
@@ -130,9 +143,14 @@ function teamCard(team) {
     <p class="line"><span><b>${fix.out.length}</b> of 11 players are out</span><span class="cl"><b>${fmt(teamStats(team.players, ctx.pool).credits)}</b> / 100 cr</span></p>
     ${scoreRow(team)}${composition(team.players, { legend: false })}
     ${pills(fix.out, { captain: team.captain, vc: team.vc, outSet })}
-    <details class="more keep"><summary>${stay.length} still playing</summary>${pills(stay, { captain: team.captain, vc: team.vc })}</details>
+    <details class="more keep"><summary>${stay.length} still playing</summary>${pillsByRole(stay, { captain: team.captain, vc: team.vc })}</details>
     <div class="opts" role="tablist" aria-label="Fix options for ${esc(team.name)}">
       ${fix.options.map((o, i) => `<button role="tab" aria-selected="${i === idx}" data-opt="${team.id}:${i}"><span>${i === 0 ? 'Best fix' : 'Option ' + (i + 1)}</span><small class="num">+${fmt(o.projGain)} proj</small></button>`).join('')}
+    </div>
+    <div class="cmp" aria-label="Before and after this fix">
+      <div><span>Players out</span><b class="num">${fix.out.length}<i>to</i>0</b></div>
+      <div><span>Credits left</span><b class="num">${fmt(100 - teamStats(team.players, ctx.pool).credits)}<i>to</i>${fmt(opt.creditsLeft)}</b></div>
+      <div><span>Projected</span><b class="num pos">+${fmt(opt.projGain)}</b></div>
     </div>
     ${swapRows(opt)}${leaderChange(team, opt)}
     <p class="why"><span class="src">${x.ai ? 'AI' : 'Built-in'}</span>${esc(x.text)}</p>
@@ -166,8 +184,8 @@ function impact() {
   const caps = aff.filter((f) => f.captainOut).length;
   const vcs = aff.filter((f) => f.vcOut).length;
   const fine = fixes.length - aff.length;
-  return `<section class="impact" aria-label="Impact summary">
-    <div class="hero"><b class="num">${aff.length}<small>/${teams.length}</small></b><span>teams broken by the toss<em>${fine} ${fine === 1 ? 'team is' : 'teams are'} fine</em></span></div>
+  return `<section class="impact" data-panel="teams" aria-label="Impact summary">
+    <div class="hero"><b class="num">${aff.length}<small>/${teams.length}</small></b><span>teams broken<i> by the toss</i><em>${fine} ${fine === 1 ? 'team is' : 'teams are'} fine</em></span></div>
     <div class="cell"><b class="num warn">${outIds.size}</b><span>players out</span></div>
     <div class="cell"><b class="num bad">${caps}</b><span>captains out</span></div>
     <div class="cell"><b class="num warn">${vcs}</b><span>VCs out</span></div>
@@ -185,7 +203,7 @@ function tossNews() {
   const side = (s) => `<div class="xi-side"><h4>${esc(sides[s])}</h4>
       <ol>${meta.xiOrder[s].map(xiRow).join('')}</ol>
       ${benched(s).length ? `<p class="bench">Not playing</p><ul class="benchlist">${benched(s).map((p) => `<li class="r-${p.role}"><i class="rl">${p.role}</i><s>${esc(p.name)}</s></li>`).join('')}</ul>` : ''}</div>`;
-  return `<section class="news"><div class="lower"><b>${esc(t.winner)}</b> won the toss and chose to ${esc(t.decision)}</div>
+  return `<section class="news" data-panel="xi"><div class="lower"><b>${esc(t.winner)}</b> won the toss and chose to ${esc(t.decision)}</div>
     <ul class="notes">${meta.notes.map((n) => `<li>${esc(n)}</li>`).join('')}</ul>
     <details class="xi" ${state.xiOpen ? 'open' : ''}><summary>Confirmed playing XIs</summary><div class="xi-grid">${side('BAY')}${side('DSH')}</div></details></section>`;
 }
@@ -211,7 +229,7 @@ function askBox() {
   const a = state.ask;
   const chips = ['Who should captain Powerplay Pandits?', 'Can I swap Mohit Saxena for Siddharth Rao in t1?', 'Which of my teams has no valid fix?'];
   const open = state.askOpen || a.q || a.answer || a.error || a.loading;
-  return `<details class="ask" ${open ? 'open' : ''}><summary><h2>Ask the Fixer</h2><span>Check any swap against the real rules</span></summary>
+  return `<details class="ask" data-panel="ask" ${open ? 'open' : ''}><summary><h2>Ask the Fixer</h2><span>Check any swap against the real rules</span></summary>
     <form data-ask><input name="q" maxlength="300" placeholder="e.g. Is swapping Tejas Naik for Harsh Menon valid in t1?" value="${esc(a.q)}" aria-label="Your question" autocomplete="off">
       <button class="apply" ${a.loading ? 'disabled' : ''}>${a.loading ? 'Checking…' : 'Ask'}</button></form>
     <div class="chips">${chips.map((c) => `<button type="button" data-chip="${esc(c)}">${esc(c)}</button>`).join('')}</div>
@@ -227,7 +245,7 @@ function fullTime() {
   const max = Math.max(e.totals.hind, e.totals.mine, e.totals.none, 1);
   const w = (v) => `${Math.max(2, Math.round((v / max) * 100))}%`;
   const line = (cls, label, v, extra = '') => `<div class="inn ${cls}"><div class="il"><span>${label}</span><b class="num">${fmt(v)}</b></div><div class="track"><i style="width:${w(v)}"></i></div>${extra}</div>`;
-  return `<section class="fulltime" aria-label="Full time">
+  return `<section class="fulltime" data-panel="teams" aria-label="Full time">
     <div class="ft-head"><h2>Full time</h2><span class="sample sm">SAMPLE (simulated)</span></div>
     <div class="rec"><b class="num">${pct}</b><span>of the gap recovered<em class="num">${fmt(e.totals.mine - e.totals.none)} of ${fmt(e.totals.hind - e.totals.none)} points</em></span></div>
     ${line('none', 'Without fixing', e.totals.none)}
@@ -247,9 +265,69 @@ function footerBar() {
   return `<button class="cta" data-act="reset">Start over</button>`;
 }
 
+/* ---------- phone: list rows, result rows, bottom sheet, tabs ---------- */
+
+const chev = '<svg class="chev" viewBox="0 0 8 14" aria-hidden="true"><path d="m1 1 6 6-6 6" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>';
+
+function teamRow(team) {
+  const fix = state.fixes.get(team.id);
+  const applied = state.applied.get(team.id);
+  const name = esc(team.name);
+  const open = (inner) => `<button class="open" data-open="${team.id}" aria-label="Open ${name}">${inner}</button>`;
+  if (!fix.broken) {
+    return `<div class="trow fine">${open(`<span class="tn">${name}</span><span class="ts ok">All 11 playing</span>`)}<span class="pillst ok">Fine</span>${chev}</div>`;
+  }
+  if (applied) {
+    return `<div class="trow fixed">${open(`<span class="tn">${name}</span><span class="ts ok">${applied.swaps.length} ${applied.swaps.length === 1 ? 'swap' : 'swaps'} applied, +${fmt(applied.projGain)} proj</span>`)}<span class="pillst ok">Fixed</span>${chev}</div>`;
+  }
+  const flag = fix.captainOut ? '<span class="fl bad">Captain out</span>' : fix.vcOut ? '<span class="fl warn">VC out</span>' : '';
+  if (fix.impossible) {
+    return `<div class="trow broken">${open(`<span class="tn">${name}</span><span class="ts"><span class="bad">${fix.out.length} out</span>${flag}<span class="bad">No valid fix</span></span>`)}${chev}</div>`;
+  }
+  const best = fix.options[state.pick.get(team.id) ?? 0];
+  return `<div class="trow broken">${open(`<span class="tn">${name}</span><span class="ts"><span class="bad">${fix.out.length} out</span>${flag}<span class="gain num">+${fmt(best.projGain)} proj</span></span>`)}<button class="qa" data-apply="${team.id}" aria-label="Apply best fix to ${name}">Fix</button></div>`;
+}
+
+function resultRow(team) {
+  const e = state.result;
+  const r = e.rows.find((x) => x.team.id === team.id);
+  const max = Math.max(...e.rows.map((x) => x.hind), 1);
+  const w = (v) => `${(v / max) * 100}%`;
+  const gain = r.mine - r.none;
+  return `<div class="trow result"><button class="open" data-open="${team.id}" aria-label="Open ${esc(team.name)}">
+    <span class="rtop"><span class="tn">${esc(team.name)}</span><span class="rg num ${gain > 0 ? 'pos' : ''}">${gain > 0 ? '+' + fmt(gain) : 'no change'}</span></span>
+    <span class="stack" role="img" aria-label="Without ${fmt(r.none)}, with fixes ${fmt(r.mine)}, hindsight best ${fmt(r.hind)}"><i class="s0" style="width:${w(r.none)}"></i><i class="s1" style="width:${w(gain)}"></i><i class="s2" style="width:${w(r.hind - r.mine)}"></i></span>
+    <span class="rnums num"><span><i class="s0"></i>${fmt(r.none)}</span><span><i class="s1"></i>${fmt(r.mine)}</span><span><i class="s2"></i>${fmt(r.hind)}</span></span></button>${chev}</div>`;
+}
+
+function sheet() {
+  const team = teams.find((t) => t.id === state.sheet);
+  if (!team) return '';
+  return `<div class="sheet-wrap"><div class="sheet" role="dialog" aria-modal="true" aria-label="${esc(team.name)}">
+    <div class="grab" aria-hidden="true"></div>
+    <button class="x" data-closesheet aria-label="Close"><svg viewBox="0 0 14 14" aria-hidden="true"><path d="m2 2 10 10M12 2 2 12" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg></button>
+    <div class="sheet-body">${teamCard(team)}</div></div></div>`;
+}
+
+function tabs() {
+  const left = [...state.fixes.values()].filter((f) => f.broken && !f.impossible && !state.applied.has(f.teamId)).length;
+  const t = (id, label, badge = '') => `<button role="tab" data-tab="${id}" aria-selected="${state.tab === id}">${label}${badge}</button>`;
+  return `<nav class="tabs" role="tablist" aria-label="Sections">${t('teams', 'My teams', left ? `<i>${left}</i>` : '')}${t('xi', 'Playing XIs')}${t('ask', 'Ask')}</nav>`;
+}
+
+function showToast(msg) {
+  state.toast = msg;
+  let el = $('#toast');
+  if (!el) { el = document.createElement('div'); el.id = 'toast'; el.setAttribute('role', 'status'); document.body.append(el); }
+  el.textContent = msg;
+  el.className = 'show';
+  clearTimeout(showToast.t);
+  showToast.t = setTimeout(() => { el.className = ''; }, 2400);
+}
+
 function preCard(t) {
-  return `<article class="team pre"><details><summary><span class="sm-h"><h3>${esc(t.name)}</h3></span>
-    ${composition(t.players)}${leaders(t)}</summary>${pills(t.players, { captain: t.captain, vc: t.vc })}</details></article>`;
+  return `<article class="team pre"><details><summary><span class="sm-h"><h3>${esc(t.name)}</h3><span class="cl"><b>${fmt(teamStats(t.players, ctx.pool).credits)}</b> / 100 cr</span></span>
+    ${composition(t.players, { legend: false })}${leaders(t)}</summary>${pillsByRole(t.players, { captain: t.captain, vc: t.vc })}</details></article>`;
 }
 
 function render() {
@@ -261,15 +339,23 @@ function render() {
       <p>Your ${teams.length} teams are all valid right now. When the toss happens, the playing XIs drop and any player who is not in them scores zero.</p></section>`;
     main = `<div class="list-h"><h2>Your ${teams.length} teams</h2><span class="allvalid">All valid</span></div>${teams.map(preCard).join('')}`;
   } else if (state.phase === 'toss') {
+    const ordered = [...teams].sort((a, b) => Number(state.fixes.get(b.id).broken) - Number(state.fixes.get(a.id).broken));
     side = `${impact()}${tossNews()}${askBox()}`;
     main = `<div class="list-h"><h2>Your teams</h2>${langToggle()}</div>
-      ${[...teams].sort((a, b) => Number(state.fixes.get(b.id).broken) - Number(state.fixes.get(a.id).broken)).map(teamCard).join('')}`;
+      <div class="dcards">${ordered.map(teamCard).join('')}</div><div class="mrows">${ordered.map(teamRow).join('')}</div>`;
   } else {
     side = fullTime();
-    main = `<div class="list-h"><h2>Team by team</h2>${langToggle()}</div>${teams.map(teamCard).join('')}`;
+    main = `<div class="list-h"><h2>Team by team</h2>${langToggle()}</div>
+      <p class="rlegend"><span><i class="s0"></i>Without</span><span><i class="s1"></i>With my fixes</span><span><i class="s2"></i>Hindsight-best</span></p>
+      <div class="dcards">${teams.map(teamCard).join('')}</div><div class="mrows">${teams.map(resultRow).join('')}</div>`;
   }
+  const sheetBody = $('.sheet-body');
+  const keep = sheetBody ? sheetBody.scrollTop : 0;
   app.className = state.fresh ? 'fresh' : '';
-  app.innerHTML = `${topbar()}${matchHeader()}<div class="shell"><aside>${side}<nav class="bar" aria-label="Actions">${footerBar()}</nav></aside><main>${main}</main></div>${state.coin ? coinOverlay() : ''}`;
+  if (state.phase === 'toss') app.dataset.tab = state.tab; else delete app.dataset.tab;
+  app.innerHTML = `${topbar()}${matchHeader()}${state.phase === 'toss' ? tabs() : ''}<div class="shell"><aside>${side}<nav class="bar" aria-label="Actions">${footerBar()}</nav></aside><main data-panel="teams">${main}</main></div>${state.sheet ? sheet() : ''}${state.coin ? coinOverlay() : ''}`;
+  document.documentElement.classList.toggle('lock', !!state.sheet);
+  if (state.sheet && keep) $('.sheet-body').scrollTop = keep;
 }
 
 function endCoin() {
@@ -331,7 +417,7 @@ document.addEventListener('click', (e) => {
     render();
     window.scrollTo({ top: 0 });
   } else if (d.act === 'reset') {
-    state.phase = 'pre'; state.fixes.clear(); state.pick.clear(); state.applied.clear(); state.result = null; state.ai = { en: null, hinglish: null, loading: false, error: '' }; state.ask = { q: '', loading: false, answer: '', tools: [], error: '' };
+    state.phase = 'pre'; state.fixes.clear(); state.pick.clear(); state.applied.clear(); state.result = null; state.ai = { en: null, hinglish: null, loading: false, error: '' }; state.ask = { q: '', loading: false, answer: '', tools: [], error: '' }; state.tab = 'teams'; state.sheet = null;
     render(); window.scrollTo({ top: 0 });
   } else if (d.apply) { state.applied.set(d.apply, state.fixes.get(d.apply).options[state.pick.get(d.apply) ?? 0]); render(); }
   else if (d.undo) { state.applied.delete(d.undo); render(); }
@@ -340,6 +426,35 @@ document.addEventListener('click', (e) => {
 });
 
 document.addEventListener('click', (e) => { if (e.target.closest('#coin')) endCoin(); });
+
+// Phone navigation: tabs, bottom sheet (with browser back support), and action feedback.
+function openSheet(id) {
+  state.sheet = id;
+  history.pushState({ sheet: id }, '');
+  render();
+}
+function closeSheet() {
+  if (history.state?.sheet) history.back(); // popstate does the rest
+  else { state.sheet = null; render(); }
+}
+window.addEventListener('popstate', () => { if (state.sheet) { state.sheet = null; render(); } });
+document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && state.sheet) closeSheet(); });
+document.addEventListener('click', (e) => {
+  if (e.target.classList?.contains('sheet-wrap')) return closeSheet();
+  const b = e.target.closest('button');
+  if (!b) return;
+  const d = b.dataset;
+  if (d.open) openSheet(d.open);
+  else if (d.closesheet !== undefined) closeSheet();
+  else if (d.tab) { state.tab = d.tab; render(); window.scrollTo({ top: 0 }); }
+  else if (d.apply) {
+    const name = teams.find((t) => t.id === d.apply).name;
+    const wasSheet = !!state.sheet;
+    state.sheet = null; render();
+    if (wasSheet && history.state?.sheet) history.back();
+    showToast(`${name} fixed`);
+  } else if (d.act === 'fixall') showToast(`Fixed ${state.applied.size} teams`);
+});
 // <details> does not bubble 'toggle'; capture it so the open state survives re-renders.
 document.addEventListener('toggle', (e) => {
   if (e.target.matches('details.xi')) state.xiOpen = e.target.open;

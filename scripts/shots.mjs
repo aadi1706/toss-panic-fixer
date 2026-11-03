@@ -18,6 +18,7 @@ for (const [name, width, height] of [['mobile', 390, 844], ['desktop', 1280, 900
   await page.goto(url);
   await page.screenshot({ path: `${dir}/${name}-1-pre.png`, fullPage: true });
   await page.click('[data-act=toss]:visible');
+  await page.waitForTimeout(2800); // let the toss reveal finish
   await page.screenshot({ path: `${dir}/${name}-2-toss.png`, fullPage: true });
   await page.click('[data-act=fixall]:visible');
   await page.screenshot({ path: `${dir}/${name}-3-fixed.png`, fullPage: true });
