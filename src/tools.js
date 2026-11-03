@@ -1,6 +1,6 @@
 // Tools the "Ask the Fixer" model can call. Each one runs the real engine on the sample data
 // and returns plain JSON. Errors are returned as { error } so the model can recover.
-import { validate, findBroken, project, LIMITS } from './engine.js';
+import { validate, findBroken, fixTeam, project, LIMITS } from './engine.js';
 
 const r1 = (n) => Math.round(n * 10) / 10;
 const norm = (s) => String(s ?? '').trim().toLowerCase();
@@ -22,6 +22,24 @@ export function makeTools({ ctx, teams, sides }) {
         players: t.players.map((id) => view(ctx.pool.get(id))),
         notPlaying: b.out.map((id) => ctx.pool.get(id).name), captainOut: b.captainOut, viceCaptainOut: b.vcOut,
       };
+    },
+
+    // One call that answers "which teams are broken / have no fix / need a new captain".
+    overview_all_teams() {
+      const name = (id) => ctx.pool.get(id).name;
+      return teams.map((t) => {
+        const fix = fixTeam(t, ctx);
+        const best = fix.options[0];
+        return {
+          id: t.id, name: t.name,
+          status: !fix.broken ? 'fine' : fix.impossible ? 'broken, no valid fix' : 'broken, fixable',
+          notPlaying: fix.out.map(name), captainOut: fix.captainOut, viceCaptainOut: fix.vcOut,
+          bestFix: best && {
+            swaps: best.swaps.map((x) => ({ out: name(x.out), in: name(x.in) })),
+            creditsLeft: best.creditsLeft, captain: name(best.captain), viceCaptain: name(best.vc), projectedGain: Math.round(best.projGain * 10) / 10,
+          },
+        };
+      });
     },
 
     list_playing_xi() {
@@ -63,6 +81,11 @@ export const TOOL_DEFS = [
     name: 'get_team',
     description: 'Get one of the fan\'s teams: players (role, credits, whether in the announced playing XI), captain, vice-captain and who is not playing.',
     input_schema: { type: 'object', properties: { team: { type: 'string', description: 'team id like t1, or the team name' } }, required: ['team'] },
+  },
+  {
+    name: 'overview_all_teams',
+    description: 'One-call summary of all 8 fan teams: status (fine, broken fixable, broken with no valid fix), who is not playing, whether captain or vice-captain is out, and the engine\'s best fix. Use this first for any question about several teams.',
+    input_schema: { type: 'object', properties: {} },
   },
   {
     name: 'list_playing_xi',

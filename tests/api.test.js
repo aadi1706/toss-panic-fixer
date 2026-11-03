@@ -99,3 +99,15 @@ test('tools: real engine results, and errors the model can recover from', () => 
   assert.equal(r.creditsLeft, Math.round((100 - (t.players.reduce((a, id) => a + ctx.pool.get(id).credits, 0) - out.credits + inn.credits)) * 10) / 10);
   assert.ok(tools.simulate_swap({ team: 't1', out: 'Siddharth Rao', in: 'Kabir Sethi' }).error);
 });
+
+test('tools: overview_all_teams summarises every team in one call from the real engine', () => {
+  const tools = makeTools({ ctx, teams, sides });
+  const o = tools.overview_all_teams();
+  assert.equal(o.length, teams.length);
+  assert.equal(o.filter((x) => x.status === 'fine').length, 1);
+  assert.equal(o.filter((x) => x.status === 'broken, no valid fix').length, 0);
+  const t1 = o.find((x) => x.id === 't1');
+  assert.ok(t1.captainOut && t1.notPlaying.includes('Rohan Malhotra'));
+  assert.equal(t1.bestFix.swaps.length, t1.notPlaying.length);
+  assert.equal(o.find((x) => x.status === 'fine').bestFix, undefined);
+});
