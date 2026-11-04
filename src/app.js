@@ -6,6 +6,7 @@ import { fixTeam, teamStats, LIMITS } from './engine.js';
 import { explainTemplate, noFixText } from './explain.js';
 import { evaluate } from './evaluate.js';
 import { explainAll, askFixer } from './ai.js';
+import { md } from './markdown.js';
 
 // The active dataset. `ctx, teams, meta, match, sides, players` always point at it; useDataset() swaps them.
 let D, ctx, teams, meta, match, sides, players, actual;
@@ -135,6 +136,13 @@ function leaderDiff(team, opt) {
   return `${one('C', team.captain, opt.captain)}${one('VC', team.vc, opt.vc)}`;
 }
 
+function whyBlock(x, idx) {
+  const lang = state.lang === 'hinglish' ? ' lang="hi-Latn"' : '';
+  if (state.ai.loading) return `<p class="why loading" role="status"><span class="src">AI</span>Claude is writing explanations…</p>`;
+  const scope = state.ai[state.lang] && !x.ai && idx !== 0 ? '<small class="why-note">The AI explains the best fix; this option uses the built-in explanation.</small>' : '';
+  return `<div class="why"${lang}><span class="src">${x.ai ? 'AI' : 'Built-in'}</span><div class="why-t">${md(x.text)}</div>${scope}</div>`;
+}
+
 function decision(team, fix) {
   const idx = state.pick.get(team.id) ?? 0;
   const opt = fix.options[idx];
@@ -147,8 +155,8 @@ function decision(team, fix) {
     </div>
     <p class="shift num">Players out <b>${fix.out.length}</b> <span aria-hidden="true">→</span><span class="sr">to</span> <b>0</b>
       <span class="gap"></span>Credits left <b>${fmt(beforeCr)}</b> <span aria-hidden="true">→</span><span class="sr">to</span> <b>${fmt(opt.creditsLeft)}</b></p>
+    ${whyBlock(x, idx)}
     <ul class="diffs">${opt.swaps.map(swapDiff).join('')}${leaderDiff(team, opt)}</ul>
-    <p class="why"${state.lang === 'hinglish' ? ' lang="hi-Latn"' : ''}><span class="src">${x.ai ? 'AI' : 'Built-in'}</span>${esc(x.text)}</p>
     <div class="apply-row"><span class="a-sum"><b class="num">${opt.swaps.length}</b> ${opt.swaps.length === 1 ? 'swap' : 'swaps'}, <b class="num">${opt.creditsLeft}</b> cr left</span><button class="btn primary" data-apply="${team.id}">Apply fix</button></div>
   </section>`;
 }
@@ -375,7 +383,7 @@ function askBox() {
     <form data-ask><input name="q" maxlength="300" placeholder="e.g. Is swapping Tejas Naik for Harsh Menon valid in t1?" value="${esc(a.q)}" aria-label="Your question" autocomplete="off">
       <button class="btn primary" ${a.loading ? 'disabled' : ''}>${a.loading ? 'Checking…' : 'Ask'}</button></form>
     <div class="chips">${chips.map((c) => `<button type="button" data-chip="${esc(c)}">${esc(c)}</button>`).join('')}</div>
-    <div aria-live="polite">${a.answer ? `<div class="answer"><p>${esc(a.answer)}</p><small>Checked with the real engine: ${a.tools.length ? a.tools.map((t) => `<code>${esc(t)}</code>`).join(' ') : 'no tools used'}. Projections use pre-match form only.</small></div>` : ''}
+    <div aria-live="polite">${a.answer ? `<div class="answer"><div class="md-body">${md(a.answer)}</div><small>Checked with the real engine: ${a.tools.length ? a.tools.map((t) => `<code>${esc(t)}</code>`).join(' ') : 'no tools used'}. Projections use pre-match form only.</small></div>` : ''}
     ${a.error ? `<p class="aierr">${esc(a.error)}</p>` : ''}</div></details>`;
 }
 
@@ -580,6 +588,9 @@ async function runExplain() {
   try { state.ai[lang] = await explainAll(lang, matchParam()); }
   catch { state.ai.error = 'AI is unavailable right now, so you are seeing the built-in explanations. The fixes themselves are unaffected.'; }
   state.ai.loading = false; render();
+  // Bring the new text into view: on desktop it sits in the workspace, below the not-playing list.
+  if (state.ai[lang] && isDesktop()) requestAnimationFrame(() => $('.workspace .why')?.scrollIntoView({ block: 'center', behavior: reduceMotion() ? 'auto' : 'smooth' }));
+  if (state.ai[lang]) showToast((lang === 'hinglish' ? 'AI explanations ready (Hinglish)' : 'AI explanations ready') + (isDesktop() ? '' : ': open a team to read them'));
 }
 
 async function runAsk(q) {

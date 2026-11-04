@@ -69,7 +69,7 @@ Models: Claude Haiku 5.5 for explanations and Claude Sonnet 5.5 for Ask, overrid
 
 ```bash
 npm install
-npm test                       # 40 unit tests
+npm test                       # 44 unit tests
 npm run build                  # dist/index.html, a single static file
 ANTHROPIC_API_KEY=... node scripts/dev.mjs   # http://localhost:8888, serves dist/ and /api/*
 ```

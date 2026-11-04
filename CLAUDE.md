@@ -23,7 +23,7 @@ Built, tested and deployed (https://toss-panic-fixer-aadi.netlify.app). See READ
 - AI: Netlify functions /api/explain and /api/ask (src/server/), key in a server-side env var, template fallback in src/explain.js.
 - Data: simulated sample (data/sample-*.json) plus real IPL replays built from Cricsheet (src/replay.js, data/replay/).
   The app opens on a real match; the sample is ?match=sample.
-- Checks: `npm test` (40), `npm run e2e`, `npm run e2e:replay`, `npm run a11y`.
+- Checks: `npm test` (44), `npm run e2e`, `npm run e2e:replay`, `npm run a11y`.
 
 ## Measured facts (do not invent others)
 - Across 319 real IPL matches (2015-2022, 3 generated team sets each) the engine recovers 52.8% of the gap (95% CI 51.5-54.2);

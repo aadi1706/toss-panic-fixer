@@ -364,3 +364,11 @@ b.cv { display: inline-grid; place-items: center; min-width: 22px; height: 20px;
 
 .b-main { grid-template-columns: minmax(0, 1fr); }
 .picker select { width: 100%; max-width: 100%; }
+
+/* model text */
+.why.loading { color: var(--muted); }
+.why-t > p + p, .md-body > p + p { margin-top: 8px; }
+.why-t strong, .md-body strong { color: var(--ink); font-weight: 600; }
+ul.md { list-style: disc; padding-left: 18px; margin: 6px 0; display: grid; gap: 4px; }
+.why-note { display: block; margin-top: 8px; color: var(--muted); font-size: 12px; }
+.answer p { white-space: normal; }
